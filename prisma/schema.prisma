@@ -1,0 +1,283 @@
+// Kamai — affiliate deal-sharing platform schema (PostgreSQL / Supabase)
+//
+// Money is ALWAYS stored as integer paise (₹1 = 100). Never floats.
+// User.id equals Supabase auth.users.id so Row Level Security can use auth.uid().
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum StoreStatus {
+  ACTIVE
+  PAUSED
+}
+
+enum LedgerKind {
+  COMMISSION
+  REFERRAL_BONUS
+  ADJUSTMENT
+}
+
+// PENDING   store reported the order, return window still open
+// CONFIRMED store approved it; money is withdrawable (unless locked by a withdrawal)
+// PAID      included in a withdrawal that was paid out (terminal)
+// REJECTED  cancelled / returned (terminal)
+enum LedgerStatus {
+  PENDING
+  CONFIRMED
+  PAID
+  REJECTED
+}
+
+enum WithdrawalStatus {
+  REQUESTED
+  PROCESSING
+  PAID
+  FAILED
+}
+
+enum PayoutMethod {
+  UPI
+  BANK
+}
+
+model User {
+  id           String   @id @db.Uuid
+  email        String?  @unique
+  phone        String?  @unique
+  name         String?
+  role         Role     @default(USER)
+  /// Public code used in invite links (?ref=CODE)
+  referralCode String   @unique
+  /// Short opaque prefix placed in every tracking sub-id this user generates
+  subIdPrefix  String   @unique
+  referredById String?  @db.Uuid
+  referredBy   User?    @relation("Referrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals    User[]   @relation("Referrals")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  payoutAccount PayoutAccount?
+  links         GeneratedLink[]
+  clicks        Click[]
+  ledger        EarningsLedger[]
+  withdrawals   Withdrawal[]
+
+  @@index([referredById])
+}
+
+model PayoutAccount {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @unique @db.Uuid
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method           PayoutMethod
+  upiId            String?
+  accountHolder    String?
+  /// AES-256-GCM ciphertext (encrypt in app code or via KMS). Never store plaintext.
+  accountNumberEnc String?
+  accountLast4     String?
+  ifsc             String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model PartnerStore {
+  id                String      @id @default(uuid()) @db.Uuid
+  /// Matches StoreSlug in src/lib/linkConverter.ts (the URL rules live in code)
+  slug              String      @unique
+  name              String
+  logoUrl           String?
+  brandColor        String      @default("#1C2127")
+  status            StoreStatus @default(ACTIVE)
+  /// What the store/network pays the platform, as basis points of order value (400 = 4%)
+  commissionRateBps Int         @default(0)
+  /// Share of that commission passed to the user, in basis points (6000 = 60%)
+  userShareBps      Int         @default(6000)
+  /// Days after the order before it normally confirms (display only)
+  confirmationDays  Int         @default(60)
+  sortOrder         Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  deals  Deal[]
+  links  GeneratedLink[]
+  clicks Click[]
+  ledger EarningsLedger[]
+
+  @@index([status, sortOrder])
+}
+
+model Deal {
+  id                   String       @id @default(uuid()) @db.Uuid
+  storeId              String       @db.Uuid
+  store                PartnerStore @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  externalId           String?
+  title                String
+  description          String?
+  imageUrl             String?
+  /// Canonical product URL on the partner store (must pass linkConverter validation)
+  productUrl           String
+  pricePaise           Int
+  mrpPaise             Int
+  discountPct          Int          @default(0)
+  /// Precomputed so we can sort/filter by profit in SQL. Recompute when rates or price change.
+  estimatedProfitPaise Int          @default(0)
+  category             String
+  tags                 String[]
+  isFeatured           Boolean      @default(false)
+  isActive             Boolean      @default(true)
+  startsAt             DateTime     @default(now())
+  expiresAt            DateTime?
+  clickCount           Int          @default(0)
+  shareCount           Int          @default(0)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  links GeneratedLink[]
+
+  @@unique([storeId, externalId])
+  @@index([isActive, discountPct(sort: Desc)])
+  @@index([isActive, estimatedProfitPaise(sort: Desc)])
+  @@index([isActive, clickCount(sort: Desc)])
+  @@index([isActive, createdAt(sort: Desc)])
+  @@index([storeId, isActive])
+  @@index([category, isActive])
+  @@index([expiresAt])
+}
+
+model GeneratedLink {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @db.Uuid
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId        String       @db.Uuid
+  store          PartnerStore @relation(fields: [storeId], references: [id])
+  dealId         String?      @db.Uuid
+  deal           Deal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  /// Short code in https://host/r/:code
+  code           String       @unique
+  /// Tracking id sent to the store/network; conversions come back with it
+  subId          String       @unique
+  originalUrl    String
+  canonicalUrl   String
+  /// sha256(canonicalUrl) — makes link creation idempotent per user
+  urlHash        String
+  destinationUrl String
+  clickCount     Int          @default(0)
+  lastClickedAt  DateTime?
+  createdAt      DateTime     @default(now())
+
+  clicks Click[]
+  ledger EarningsLedger[]
+
+  @@unique([userId, urlHash])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([storeId])
+  @@index([dealId])
+}
+
+model Click {
+  id         String        @id @default(uuid()) @db.Uuid
+  linkId     String        @db.Uuid
+  link       GeneratedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  /// Denormalised from the link for cheap per-user / per-store reporting
+  userId     String        @db.Uuid
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId    String        @db.Uuid
+  store      PartnerStore  @relation(fields: [storeId], references: [id])
+  /// sha256(dailySalt + ip). Raw IPs are never stored.
+  ipHash     String
+  userAgent  String?
+  referer    String?
+  deviceType String?
+  isBot      Boolean       @default(false)
+  createdAt  DateTime      @default(now())
+
+  @@index([linkId, createdAt])
+  @@index([userId, createdAt])
+  @@index([storeId, createdAt])
+}
+
+model EarningsLedger {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @db.Uuid
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId          String?       @db.Uuid
+  store            PartnerStore? @relation(fields: [storeId], references: [id])
+  linkId           String?       @db.Uuid
+  link             GeneratedLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
+  kind             LedgerKind    @default(COMMISSION)
+  status           LedgerStatus  @default(PENDING)
+
+  /// Idempotency key from the store: one row per order line
+  externalOrderId  String
+  externalItemId   String        @default("")
+  orderAmountPaise Int           @default(0)
+  /// What the store paid the platform
+  commissionPaise  Int           @default(0)
+  /// What the user earns (signed: ADJUSTMENT rows may be negative)
+  userAmountPaise  Int
+
+  pendingAt        DateTime?
+  confirmedAt      DateTime?
+  paidAt           DateTime?
+  rejectedAt       DateTime?
+  rejectionReason  String?
+
+  /// Set while a withdrawal has claimed this row. Null = available (when CONFIRMED).
+  withdrawalId     String?       @db.Uuid
+  withdrawal       Withdrawal?   @relation(fields: [withdrawalId], references: [id], onDelete: SetNull)
+
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([storeId, externalOrderId, externalItemId])
+  @@index([userId, status])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([withdrawalId])
+  @@index([linkId])
+}
+
+model Withdrawal {
+  id             String           @id @default(uuid()) @db.Uuid
+  userId         String           @db.Uuid
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountPaise    Int
+  status         WithdrawalStatus @default(REQUESTED)
+  method         PayoutMethod
+  /// Destination copied at request time (account edits must not redirect an in-flight payout)
+  payoutSnapshot Json
+  utr            String?
+  failureReason  String?
+  requestedAt    DateTime         @default(now())
+  processedAt    DateTime?
+  paidAt         DateTime?
+
+  entries EarningsLedger[]
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@index([status])
+}
+
+/// Raw log of conversion postbacks: audit trail + replay protection
+model WebhookEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  storeSlug   String
+  payloadHash String    @unique
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@index([storeSlug, receivedAt])
+}
