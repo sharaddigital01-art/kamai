@@ -28,6 +28,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { formatINR } from "@/lib/money";
+import { WithdrawModal } from "@/components/WithdrawModal";
 
 interface AuthUserData {
   id: string;
@@ -45,12 +46,31 @@ export default function ProfilePage() {
   const [user, setUser] = useState<AuthUserData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
 
   const [balances, setBalances] = useState({
     lifetime: 0,
     available: 0,
     pending: 0,
   });
+
+  async function refreshStats() {
+    try {
+      const statsRes = await fetch("/api/stats");
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        if (statsData.balances) {
+          setBalances({
+            lifetime: statsData.balances.lifetime || 0,
+            available: statsData.balances.available || 0,
+            pending: statsData.balances.pending || 0,
+          });
+        }
+      }
+    } catch {
+      //
+    }
+  }
 
   useEffect(() => {
     async function init() {
@@ -247,13 +267,14 @@ export default function ProfilePage() {
                 {formatINR(balances.lifetime)}
               </p>
             </div>
-            <Link
-              href="/earnings"
+            <button
+              type="button"
+              onClick={() => setWithdrawModalOpen(true)}
               className="flex items-center gap-1 rounded-full bg-[#22c55e] px-4 py-1.5 text-xs font-extrabold text-ink hover:bg-emerald-300 transition shadow-sm active:scale-95"
             >
               <span>Withdraw</span>
               <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+            </button>
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/10 pt-3 text-xs">
@@ -316,6 +337,23 @@ export default function ProfilePage() {
             Earnings & Payouts
           </div>
           <div className="divide-y divide-black/5 text-xs sm:text-sm">
+            <button
+              type="button"
+              onClick={() => setWithdrawModalOpen(true)}
+              className="flex w-full items-center justify-between p-3.5 hover:bg-canvas transition text-left"
+            >
+              <div className="flex items-center gap-3 font-semibold text-ink">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-[#169443]">
+                  <CreditCard className="h-4 w-4" />
+                </span>
+                <div>
+                  <span>Request UPI Withdrawal</span>
+                  <p className="text-[11px] text-ink-soft">Withdraw available balance with email OTP</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-ink-faint" />
+            </button>
+
             <Link href="/earnings" className="flex items-center justify-between p-3.5 hover:bg-canvas transition">
               <div className="flex items-center gap-3 font-semibold text-ink">
                 <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-50 text-[#169443]">
@@ -398,6 +436,18 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Withdrawal with Email OTP Modal */}
+      <WithdrawModal
+        isOpen={withdrawModalOpen}
+        onClose={() => setWithdrawModalOpen(false)}
+        availablePaise={balances.available}
+        userEmail={user.email || ""}
+        userName={user.name || undefined}
+        onSuccess={() => {
+          refreshStats();
+        }}
+      />
     </div>
   );
 }

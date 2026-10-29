@@ -5,10 +5,12 @@ import {
   isDatabaseConfigured,
   getLiveStats,
   getLiveBalances,
+  getUserBalances,
   getLiveLedger,
   getLiveWithdrawals,
   getLiveClicks,
   getLiveTotalClicks,
+  DEMO_USER,
 } from "@/lib/mockData";
 
 export const runtime = "nodejs";
@@ -120,9 +122,9 @@ export async function GET() {
     }
   } else {
     // In fallback mode: read dynamic runtime state
-    balances = getLiveBalances();
-    ledger = getLiveLedger();
-    withdrawals = getLiveWithdrawals();
+    balances = getUserBalances(user.id);
+    ledger = getLiveLedger().filter((l) => (l as any).userId === user.id || user.id === DEMO_USER.id);
+    withdrawals = getLiveWithdrawals().filter((w) => w.userId === user.id || user.id === DEMO_USER.id);
     totalClicks = getLiveTotalClicks();
     totalTxns = ledger.filter((l) => l.status === "CONFIRMED" || l.status === "PAID").length;
   }

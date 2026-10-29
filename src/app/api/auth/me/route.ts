@@ -20,6 +20,7 @@ export async function GET() {
       user: {
         id: user.id,
         email: user.email,
+        phone: (user as any).phone || null,
         name: user.name,
         role: user.role,
         referralCode: user.referralCode,

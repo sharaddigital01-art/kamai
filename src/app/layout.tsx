@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Bricolage_Grotesque, Figtree } from "next/font/google";
 import type { ReactNode } from "react";
 import { EarnKaroHeader } from "@/components/EarnKaroHeader";
 import { EarnKaroBottomNav } from "@/components/EarnKaroBottomNav";
@@ -9,9 +8,6 @@ import { QueryProvider } from "@/components/QueryProvider";
 import { getAuthUser } from "@/lib/auth";
 import { getBalances } from "@/lib/ledger";
 import "./globals.css";
-
-const display = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-display", display: "swap" });
-const body = Figtree({ subsets: ["latin"], variable: "--font-body", display: "swap" });
 
 export const metadata: Metadata = {
   title: "EarnKaro: Turn Every Share into Real Cash",
@@ -36,7 +32,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   }
 
   return (
-    <html lang="en" className={`${display.variable} ${body.variable}`}>
+    <html lang="en">
       <body className="bg-canvas min-h-screen text-ink antialiased flex flex-col justify-between">
         <QueryProvider>
           {/* Top Forest Green Header */}

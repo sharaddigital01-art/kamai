@@ -73,7 +73,14 @@ export default async function EarningsPage() {
             <h2 id="wd-h" className="mb-3 font-display text-lg font-bold">
               Withdraw
             </h2>
-            <WithdrawButton availablePaise={balances.available} hasPayout={Boolean(payout)} inProgress={inProgress} />
+            <WithdrawButton
+              availablePaise={balances.available}
+              hasPayout={Boolean(payout)}
+              inProgress={inProgress}
+              userEmail={user.email ?? ""}
+              userName={user.name ?? undefined}
+              defaultUpiId={payout?.upiId ?? undefined}
+            />
           </section>
 
           <section aria-labelledby="ledger-h">

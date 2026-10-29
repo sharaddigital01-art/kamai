@@ -480,8 +480,10 @@ export interface MockClickEvent {
 export interface MockUserRecord {
   id: string;
   email: string;
+  phone?: string | null;
   name: string;
   role: "USER" | "ADMIN";
+  isVerified?: boolean;
   referralCode: string;
   subIdPrefix: string;
   createdAt: Date;
@@ -497,6 +499,7 @@ const g = globalThis as unknown as {
   mockDeals?: MockDealItem[];
   mockClicks?: MockClickEvent[];
   mockUsers?: Map<string, MockUserRecord>;
+  userBalances?: Map<string, Balances>;
   totalClicks?: number;
   adminRevenuePaise?: number;
 };
@@ -851,23 +854,63 @@ export function recordCuelinksPostback(data: {
   };
 }
 
-// Withdrawals
-export function recordWithdrawalRequest(amountPaise: number, upiId: string, accountHolder = "Demo Partner") {
-  if (!g.mockBalances) {
-    g.mockBalances = { pending: 0, available: 0, inWithdrawal: 0, paid: 0, lifetime: 0 };
+export function getUserBalances(userId?: string): Balances {
+  if (!g.userBalances) {
+    g.userBalances = new Map();
   }
+  if (!userId || userId === DEMO_USER.id) {
+    if (!g.mockBalances) {
+      g.mockBalances = { pending: 0, available: 0, inWithdrawal: 0, paid: 0, lifetime: 0 };
+    }
+    return g.mockBalances;
+  }
+  if (!g.userBalances.has(userId)) {
+    g.userBalances.set(userId, {
+      pending: 0,
+      available: 0,
+      inWithdrawal: 0,
+      paid: 0,
+      lifetime: 0,
+    });
+  }
+  return g.userBalances.get(userId)!;
+}
+
+export function creditUserBalance(userId: string, amountPaise: number) {
+  const balances = getUserBalances(userId);
+  balances.available += amountPaise;
+  balances.lifetime += amountPaise;
+  if (userId === DEMO_USER.id && g.mockBalances) {
+    g.mockBalances.available = balances.available;
+    g.mockBalances.lifetime = balances.lifetime;
+  }
+  return balances;
+}
+
+// Withdrawals
+export function recordWithdrawalRequest(
+  amountPaise: number,
+  upiId: string,
+  accountHolder = "EarnKaro User",
+  userId = DEMO_USER.id
+) {
+  const balances = getUserBalances(userId);
   if (!g.mockWithdrawals) g.mockWithdrawals = [];
 
-  if (amountPaise > g.mockBalances.available) {
+  if (amountPaise > balances.available) {
     throw new Error("Withdrawal amount exceeds available balance.");
   }
 
-  g.mockBalances.available -= amountPaise;
-  g.mockBalances.inWithdrawal += amountPaise;
+  balances.available -= amountPaise;
+  balances.inWithdrawal += amountPaise;
+  if (userId === DEMO_USER.id && g.mockBalances) {
+    g.mockBalances.available = balances.available;
+    g.mockBalances.inWithdrawal = balances.inWithdrawal;
+  }
 
   const w: MockWithdrawalItem = {
     id: "wd-" + Date.now(),
-    userId: DEMO_USER.id,
+    userId,
     userName: accountHolder,
     amountPaise,
     method: "UPI",
@@ -933,11 +976,48 @@ export function findMockUserByEmail(email: string): MockUserRecord | undefined {
   return g.mockUsers.get(email.toLowerCase().trim());
 }
 
+export function findMockUserByPhone(phone: string): MockUserRecord | undefined {
+  if (!phone || !g.mockUsers) return undefined;
+  const clean = phone.replace(/\D/g, "");
+  for (const user of g.mockUsers.values()) {
+    if (user.phone && user.phone.replace(/\D/g, "") === clean) {
+      return user;
+    }
+  }
+  return undefined;
+}
+
+export function findMockUserById(id: string): MockUserRecord | undefined {
+  if (!id) return undefined;
+  if (!g.mockUsers) return undefined;
+  for (const user of g.mockUsers.values()) {
+    if (user.id === id) {
+      return user;
+    }
+  }
+  if (id === DEMO_USER.id) {
+    return {
+      id: DEMO_USER.id,
+      email: DEMO_USER.email || "demo@earnkaro.local",
+      phone: "+919876543210",
+      name: DEMO_USER.name || "Demo Partner",
+      role: "ADMIN",
+      isVerified: true,
+      referralCode: DEMO_USER.referralCode,
+      subIdPrefix: DEMO_USER.subIdPrefix,
+      createdAt: DEMO_USER.createdAt,
+    };
+  }
+  return undefined;
+}
+
 export function createMockUser(userData: {
   id: string;
   email: string;
+  phone?: string | null;
   name: string;
   role: "USER" | "ADMIN";
+  isVerified?: boolean;
   referralCode: string;
   subIdPrefix: string;
 }): MockUserRecord {
@@ -945,6 +1025,8 @@ export function createMockUser(userData: {
   const user: MockUserRecord = {
     ...userData,
     email: userData.email.toLowerCase().trim(),
+    phone: userData.phone || null,
+    isVerified: userData.isVerified !== undefined ? userData.isVerified : true,
     createdAt: new Date(),
   };
   g.mockUsers.set(user.email, user);
