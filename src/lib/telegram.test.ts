@@ -4,6 +4,7 @@ import {
   saveMockTelegramConfig,
   getMockTelegramConfigByUserId,
   getMockTelegramConfigByTelegramId,
+  getAllMockTelegramConfigs,
   createMockUser,
 } from "./mockData";
 
@@ -65,5 +66,20 @@ describe("Telegram Channel Automation Configuration", () => {
     expect(updated.isActive).toBe(false);
     expect(updated.telegramUserId).toBe("987654321"); // preserved
     expect(updated.targetChannelId).toBe("@my_exclusive_loot"); // preserved
+  });
+
+  it("fetches active configs list for background Python workers", () => {
+    // Reactivate for test
+    saveMockTelegramConfig({
+      userId: testUserId,
+      isActive: true,
+    });
+
+    const activeConfigs = getAllMockTelegramConfigs(true);
+    expect(activeConfigs.length).toBeGreaterThan(0);
+    const userCfg = activeConfigs.find((c) => c.userId === testUserId);
+    expect(userCfg).toBeDefined();
+    expect(userCfg?.isActive).toBe(true);
+    expect(userCfg?.targetChannelId).toBe("@my_exclusive_loot");
   });
 });

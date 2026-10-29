@@ -1205,3 +1205,29 @@ export function saveMockTelegramConfig(data: {
   g.mockTelegramConfigs.set(data.userId, updated);
   return updated;
 }
+
+export function getAllMockTelegramConfigs(activeOnly = false): MockTelegramChannelConfig[] {
+  if (!g.mockTelegramConfigs) g.mockTelegramConfigs = new Map();
+
+  if (g.mockTelegramConfigs.size === 0) {
+    const seed: MockTelegramChannelConfig = {
+      id: "tg-seed-001",
+      userId: DEMO_USER.id,
+      telegramUserId: "123456789",
+      telegramUsername: "demopartner_deals",
+      sourceChannels: DEFAULT_SOURCE_CHANNELS,
+      targetChannelId: "@demopartner_deals",
+      targetChannelName: "Demo Loot Deals",
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    g.mockTelegramConfigs.set(DEMO_USER.id, seed);
+  }
+
+  const all = Array.from(g.mockTelegramConfigs.values());
+  if (activeOnly) {
+    return all.filter((c) => c.isActive);
+  }
+  return all;
+}
