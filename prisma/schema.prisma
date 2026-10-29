@@ -68,8 +68,9 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  payoutAccount PayoutAccount?
-  links         GeneratedLink[]
+  payoutAccount  PayoutAccount?
+  telegramConfig TelegramChannelConfig?
+  links          GeneratedLink[]
   clicks        Click[]
   ledger        EarningsLedger[]
   withdrawals   Withdrawal[]
@@ -280,4 +281,20 @@ model WebhookEvent {
   error       String?
 
   @@index([storeSlug, receivedAt])
+}
+
+model TelegramChannelConfig {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @unique @db.Uuid
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telegramUserId    String?  @unique
+  telegramUsername  String?
+  sourceChannels    String[]
+  targetChannelId   String?
+  targetChannelName String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([telegramUserId])
 }

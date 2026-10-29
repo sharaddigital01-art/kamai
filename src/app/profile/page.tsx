@@ -386,25 +386,53 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Group B: Telegram & Exclusive Deals */}
+        {/* Group B: Telegram Automation & Community */}
         <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-          <div className="p-3.5">
+          <div className="bg-canvas/50 px-4 py-2 text-[11px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5 flex items-center justify-between">
+            <span>Telegram Channel Automation</span>
+            <span className="rounded-full bg-emerald-100 text-[#169443] px-2 py-0.5 text-[9px] font-black uppercase">
+              Bot Sync
+            </span>
+          </div>
+
+          <div className="p-3.5 space-y-2.5">
+            <Link
+              href="/telegram-bot"
+              className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-[#134024] to-[#0088cc] p-3.5 text-white shadow-sm hover:opacity-95 transition"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
+                  <Send className="h-5 w-5 text-white" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-xs sm:text-sm">Telegram Bot Automation</h4>
+                    <span className="rounded-full bg-[#22c55e] text-ink px-1.5 py-0.2 text-[9px] font-black uppercase">
+                      New
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-sky-100">Auto-convert deals & post to your channel 24/7</p>
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+
             <a
               href="https://t.me/earnkaro"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-[#0088cc] to-[#00aaff] p-3 text-white shadow-sm hover:opacity-95 transition"
+              className="flex items-center justify-between rounded-2xl bg-canvas p-3 text-ink hover:bg-black/5 transition"
             >
               <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
-                  <Send className="h-5 w-5" />
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#0088cc]/10 text-[#0088cc]">
+                  <Send className="h-4 w-4" />
                 </span>
                 <div>
-                  <h4 className="font-bold text-xs sm:text-sm">Join EarnKaro Telegram Channel</h4>
-                  <p className="text-[11px] text-white/80">Get high-profit price drop alerts</p>
+                  <h4 className="font-bold text-xs sm:text-sm">Join EarnKaro Official Telegram</h4>
+                  <p className="text-[11px] text-ink-soft">Get top curated deals and instant price drop alerts</p>
                 </div>
               </div>
-              <ArrowRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4 text-ink-faint" />
             </a>
           </div>
         </div>

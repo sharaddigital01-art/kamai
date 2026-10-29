@@ -102,6 +102,7 @@ export function EarnKaroHeader({
     { label: "Make Links", href: "/make-links", icon: Link2, highlight: true },
     { label: "Reports & Analytics", href: "/reports", icon: TrendingUp },
     { label: "My Profile", href: "/profile", icon: User },
+    { label: "Telegram Bot Automation", href: "/telegram-bot", icon: Send, highlight: true },
     { label: "My Earnings & Withdrawal", href: "/earnings", icon: Wallet },
     { label: "My Link Performance", href: "/links", icon: Link2 },
     ...(isAdmin ? [{ label: "Admin Portal", href: "/admin", icon: ShieldCheck, admin: true }] : []),

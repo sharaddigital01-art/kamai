@@ -489,6 +489,19 @@ export interface MockUserRecord {
   createdAt: Date;
 }
 
+export interface MockTelegramChannelConfig {
+  id: string;
+  userId: string;
+  telegramUserId: string | null;
+  telegramUsername: string | null;
+  sourceChannels: string[];
+  targetChannelId: string | null;
+  targetChannelName: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 const g = globalThis as unknown as {
   mockLinks?: Map<string, MockLink>;
   mockBalances?: Balances;
@@ -500,6 +513,7 @@ const g = globalThis as unknown as {
   mockClicks?: MockClickEvent[];
   mockUsers?: Map<string, MockUserRecord>;
   userBalances?: Map<string, Balances>;
+  mockTelegramConfigs?: Map<string, MockTelegramChannelConfig>;
   totalClicks?: number;
   adminRevenuePaise?: number;
 };
@@ -1138,3 +1152,56 @@ export const MOCK_PAYOUT: {
   createdAt: new Date(),
   updatedAt: new Date(),
 };
+
+// Telegram Channel Automation Helpers
+export const DEFAULT_SOURCE_CHANNELS = [
+  "@lootdealsindia",
+  "@flipkart_loot_offers",
+  "@amazon_great_indian_deals",
+  "@fashion_discount_hub",
+  "@earnkaro_hot_deals",
+];
+
+export function getMockTelegramConfigByUserId(userId: string): MockTelegramChannelConfig | null {
+  if (!g.mockTelegramConfigs) g.mockTelegramConfigs = new Map();
+  return g.mockTelegramConfigs.get(userId) || null;
+}
+
+export function getMockTelegramConfigByTelegramId(telegramUserId: string): MockTelegramChannelConfig | null {
+  if (!g.mockTelegramConfigs) g.mockTelegramConfigs = new Map();
+  for (const cfg of g.mockTelegramConfigs.values()) {
+    if (cfg.telegramUserId === telegramUserId) {
+      return cfg;
+    }
+  }
+  return null;
+}
+
+export function saveMockTelegramConfig(data: {
+  userId: string;
+  telegramUserId?: string | null;
+  telegramUsername?: string | null;
+  sourceChannels?: string[];
+  targetChannelId?: string | null;
+  targetChannelName?: string | null;
+  isActive?: boolean;
+}): MockTelegramChannelConfig {
+  if (!g.mockTelegramConfigs) g.mockTelegramConfigs = new Map();
+  const existing = g.mockTelegramConfigs.get(data.userId);
+
+  const updated: MockTelegramChannelConfig = {
+    id: existing?.id || "tg-cfg-" + Date.now(),
+    userId: data.userId,
+    telegramUserId: data.telegramUserId !== undefined ? data.telegramUserId : existing?.telegramUserId || null,
+    telegramUsername: data.telegramUsername !== undefined ? data.telegramUsername : existing?.telegramUsername || null,
+    sourceChannels: data.sourceChannels !== undefined ? data.sourceChannels : existing?.sourceChannels || DEFAULT_SOURCE_CHANNELS,
+    targetChannelId: data.targetChannelId !== undefined ? data.targetChannelId : existing?.targetChannelId || null,
+    targetChannelName: data.targetChannelName !== undefined ? data.targetChannelName : existing?.targetChannelName || null,
+    isActive: data.isActive !== undefined ? data.isActive : (existing?.isActive !== undefined ? existing.isActive : true),
+    createdAt: existing?.createdAt || new Date(),
+    updatedAt: new Date(),
+  };
+
+  g.mockTelegramConfigs.set(data.userId, updated);
+  return updated;
+}
