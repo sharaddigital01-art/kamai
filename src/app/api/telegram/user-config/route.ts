@@ -23,7 +23,8 @@ export async function GET(req: Request) {
 
     // 1. Shared secret worker authentication header
     const workerSecretHeader = req.headers.get("x-worker-secret")?.trim();
-    const expectedSecret = process.env.TELEGRAM_WORKER_SECRET?.trim() || "kamaikaro-tg-worker-secret-2026";
+    const expectedSecret =
+      process.env.TELEGRAM_WORKER_SECRET?.trim() || "kamaikaro-tg-worker-secret-2026";
 
     let isHeaderAuth = false;
     if (workerSecretHeader) {
@@ -42,7 +43,9 @@ export async function GET(req: Request) {
       const configs: Array<{
         userId: string;
         telegramUserId: string;
-        sourceChannels: string[];
+        sessionString: string | null;
+        sourceChannels: any;
+        targetChannels: any;
         targetChannelId: string | null;
         targetChannelName: string | null;
         trackingSubId: string;
@@ -58,12 +61,22 @@ export async function GET(req: Request) {
 
           for (const item of dbConfigs) {
             const subIdPrefix = item.user?.subIdPrefix || "EK";
+            const targetChannelsList =
+              item.targetChannels && Array.isArray(item.targetChannels) && item.targetChannels.length > 0
+                ? item.targetChannels
+                : item.targetChannelId
+                ? [{ id: item.targetChannelId, title: item.targetChannelName || item.targetChannelId }]
+                : [];
+
             configs.push({
               userId: item.userId,
               telegramUserId: item.telegramUserId || "",
-              sourceChannels: item.sourceChannels && item.sourceChannels.length > 0
-                ? item.sourceChannels
-                : DEFAULT_SOURCE_CHANNELS,
+              sessionString: item.sessionString || null,
+              sourceChannels:
+                item.sourceChannels && Array.isArray(item.sourceChannels) && item.sourceChannels.length > 0
+                  ? item.sourceChannels
+                  : DEFAULT_SOURCE_CHANNELS,
+              targetChannels: targetChannelsList,
               targetChannelId: item.targetChannelId || null,
               targetChannelName: item.targetChannelName || null,
               trackingSubId: `${subIdPrefix}_tg`,
@@ -81,12 +94,22 @@ export async function GET(req: Request) {
         for (const item of mockList) {
           const u = findMockUserById(item.userId) || DEMO_USER;
           const subIdPrefix = u?.subIdPrefix || "EK";
+          const targetChannelsList =
+            item.targetChannels && Array.isArray(item.targetChannels) && item.targetChannels.length > 0
+              ? item.targetChannels
+              : item.targetChannelId
+              ? [{ id: item.targetChannelId, title: item.targetChannelName || item.targetChannelId }]
+              : [];
+
           configs.push({
             userId: item.userId,
             telegramUserId: item.telegramUserId || "",
-            sourceChannels: item.sourceChannels && item.sourceChannels.length > 0
-              ? item.sourceChannels
-              : DEFAULT_SOURCE_CHANNELS,
+            sessionString: item.sessionString || null,
+            sourceChannels:
+              item.sourceChannels && Array.isArray(item.sourceChannels) && item.sourceChannels.length > 0
+                ? item.sourceChannels
+                : DEFAULT_SOURCE_CHANNELS,
+            targetChannels: targetChannelsList,
             targetChannelId: item.targetChannelId || null,
             targetChannelName: item.targetChannelName || null,
             trackingSubId: `${subIdPrefix}_tg`,
@@ -106,7 +129,6 @@ export async function GET(req: Request) {
     let config: any = null;
 
     if (queryTelegramId) {
-      // Worker bot querying by verified telegram user ID
       if (isDatabaseConfigured()) {
         try {
           config = await prisma.telegramChannelConfig.findFirst({
@@ -138,10 +160,9 @@ export async function GET(req: Request) {
         );
       }
     } else {
-      // Dashboard querying by userId or session cookie
       let targetUserId = queryUserId;
       if (!targetUserId && !isHeaderAuth) {
-        const sessionUser = await getApiUser();
+        const sessionUser = await getApiUser().catch(() => null);
         targetUserId = sessionUser?.id;
       }
 
@@ -152,7 +173,6 @@ export async function GET(req: Request) {
         );
       }
 
-      // If worker header was passed without targetUserId, default to demo user
       if (!targetUserId && isHeaderAuth) {
         targetUserId = DEMO_USER.id;
       }
@@ -184,14 +204,25 @@ export async function GET(req: Request) {
 
     const isConnected = Boolean(config?.telegramUserId);
     const trackingSubId = user ? `${user.subIdPrefix || "EK"}_tg` : null;
-    const sourceChannels = config?.sourceChannels && config.sourceChannels.length > 0
-      ? config.sourceChannels
-      : DEFAULT_SOURCE_CHANNELS;
+
+    const sourceChannels =
+      config?.sourceChannels && Array.isArray(config.sourceChannels) && config.sourceChannels.length > 0
+        ? config.sourceChannels
+        : DEFAULT_SOURCE_CHANNELS;
+
+    const targetChannels =
+      config?.targetChannels && Array.isArray(config.targetChannels) && config.targetChannels.length > 0
+        ? config.targetChannels
+        : config?.targetChannelId
+        ? [{ id: config.targetChannelId, title: config.targetChannelName || config.targetChannelId }]
+        : [];
 
     const singleConfigItem = {
       userId: user?.id || config?.userId || "",
       telegramUserId: config?.telegramUserId || "",
+      sessionString: config?.sessionString || null,
       sourceChannels,
+      targetChannels,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
       trackingSubId: trackingSubId || "EK_tg",
@@ -203,9 +234,11 @@ export async function GET(req: Request) {
       connected: isConnected,
       telegramUserId: config?.telegramUserId || null,
       telegramUsername: config?.telegramUsername || null,
+      sessionString: config?.sessionString || null,
+      sourceChannels,
+      targetChannels,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
-      sourceChannels,
       isActive: config?.isActive !== undefined ? config.isActive : true,
       user: user
         ? {

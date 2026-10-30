@@ -82,4 +82,83 @@ describe("Telegram Channel Automation Configuration", () => {
     expect(userCfg?.isActive).toBe(true);
     expect(userCfg?.targetChannelId).toBe("@my_exclusive_loot");
   });
+
+  it("stores and returns Telethon session string and channel maps via API routes", async () => {
+    // 1. Test POST /api/telegram/save-session
+    const { POST: postSaveSession } = await import("@/app/api/telegram/save-session/route");
+    const testSession = "1BVtsOGQBu3k8...telethon_mock_session_string...";
+    const sessionReq = new Request("http://localhost:3000/api/telegram/save-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+      body: JSON.stringify({
+        userId: testUserId,
+        telegramUserId: "987654321",
+        sessionString: testSession,
+        isActive: true,
+      }),
+    });
+
+    const sessionRes = await postSaveSession(sessionReq);
+    expect(sessionRes.status).toBe(200);
+    const sessionData = await sessionRes.json();
+    expect(sessionData.success).toBe(true);
+    expect(sessionData.telegramUserId).toBe("987654321");
+
+    // 2. Test POST /api/telegram/channels
+    const { POST: postChannels, GET: getChannels } = await import("@/app/api/telegram/channels/route");
+    const channelsReq = new Request("http://localhost:3000/api/telegram/channels", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+      body: JSON.stringify({
+        userId: testUserId,
+        sourceChannels: [
+          { id: "-100123456789", title: "Mega Deals Hub", username: "megadeals" },
+        ],
+        targetChannels: [
+          { id: "-100987654321", title: "My Verified Channel", username: "mychannel" },
+        ],
+        isActive: true,
+      }),
+    });
+
+    const channelsRes = await postChannels(channelsReq);
+    expect(channelsRes.status).toBe(200);
+    const channelsData = await channelsRes.json();
+    expect(channelsData.success).toBe(true);
+
+    // 3. Test GET /api/telegram/channels
+    const getReq = new Request(`http://localhost:3000/api/telegram/channels?userId=${testUserId}`, {
+      method: "GET",
+      headers: {
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+    });
+    const getRes = await getChannels(getReq);
+    expect(getRes.status).toBe(200);
+    const getData = await getRes.json();
+    expect(getData.success).toBe(true);
+    expect(getData.sourceChannels.length).toBeGreaterThan(0);
+
+    // 4. Test GET /api/telegram/user-config includes sessionString and channels
+    const { GET: getUserConfig } = await import("@/app/api/telegram/user-config/route");
+    const cfgReq = new Request("http://localhost:3000/api/telegram/user-config?activeOnly=true", {
+      method: "GET",
+      headers: {
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+    });
+    const cfgRes = await getUserConfig(cfgReq);
+    expect(cfgRes.status).toBe(200);
+    const cfgData = await cfgRes.json();
+    expect(cfgData.success).toBe(true);
+    const matchingCfg = cfgData.configs.find((c: any) => c.userId === testUserId);
+    expect(matchingCfg).toBeDefined();
+    expect(matchingCfg?.sessionString).toBe(testSession);
+  });
 });

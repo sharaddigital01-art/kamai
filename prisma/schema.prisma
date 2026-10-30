@@ -290,7 +290,9 @@ model TelegramChannelConfig {
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   telegramUserId    String?  @unique
   telegramUsername  String?
-  sourceChannels    String[]
+  sessionString     String?  @db.Text
+  sourceChannels    Json?    @default("[]")
+  targetChannels    Json?    @default("[]")
   targetChannelId   String?
   targetChannelName String?
   isActive          Boolean  @default(true)

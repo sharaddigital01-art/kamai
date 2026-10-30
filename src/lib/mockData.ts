@@ -489,12 +489,20 @@ export interface MockUserRecord {
   createdAt: Date;
 }
 
+export interface TelegramChannelItem {
+  id: string | number;
+  title: string;
+  username?: string | null;
+}
+
 export interface MockTelegramChannelConfig {
   id: string;
   userId: string;
   telegramUserId: string | null;
   telegramUsername: string | null;
-  sourceChannels: string[];
+  sessionString?: string | null;
+  sourceChannels: any;
+  targetChannels?: any;
   targetChannelId: string | null;
   targetChannelName: string | null;
   isActive: boolean;
@@ -1195,7 +1203,9 @@ export function saveMockTelegramConfig(data: {
   userId: string;
   telegramUserId?: string | null;
   telegramUsername?: string | null;
-  sourceChannels?: string[];
+  sessionString?: string | null;
+  sourceChannels?: any;
+  targetChannels?: any;
   targetChannelId?: string | null;
   targetChannelName?: string | null;
   isActive?: boolean;
@@ -1208,7 +1218,9 @@ export function saveMockTelegramConfig(data: {
     userId: data.userId,
     telegramUserId: data.telegramUserId !== undefined ? data.telegramUserId : existing?.telegramUserId || null,
     telegramUsername: data.telegramUsername !== undefined ? data.telegramUsername : existing?.telegramUsername || null,
+    sessionString: data.sessionString !== undefined ? data.sessionString : existing?.sessionString || null,
     sourceChannels: data.sourceChannels !== undefined ? data.sourceChannels : existing?.sourceChannels || DEFAULT_SOURCE_CHANNELS,
+    targetChannels: data.targetChannels !== undefined ? data.targetChannels : existing?.targetChannels || [],
     targetChannelId: data.targetChannelId !== undefined ? data.targetChannelId : existing?.targetChannelId || null,
     targetChannelName: data.targetChannelName !== undefined ? data.targetChannelName : existing?.targetChannelName || null,
     isActive: data.isActive !== undefined ? data.isActive : (existing?.isActive !== undefined ? existing.isActive : true),
