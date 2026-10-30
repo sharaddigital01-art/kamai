@@ -502,6 +502,19 @@ export interface MockTelegramChannelConfig {
   updatedAt: Date;
 }
 
+export interface MockConversionRecord {
+  id: string;
+  transactionId: string;
+  storeName: string;
+  saleAmount: number;
+  commission: number;
+  status: string;
+  subid: string | null;
+  userId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 const g = globalThis as unknown as {
   mockLinks?: Map<string, MockLink>;
   mockBalances?: Balances;
@@ -514,6 +527,7 @@ const g = globalThis as unknown as {
   mockUsers?: Map<string, MockUserRecord>;
   userBalances?: Map<string, Balances>;
   mockTelegramConfigs?: Map<string, MockTelegramChannelConfig>;
+  mockConversions?: Map<string, MockConversionRecord>;
   totalClicks?: number;
   adminRevenuePaise?: number;
 };
@@ -1228,6 +1242,118 @@ export function getAllMockTelegramConfigs(activeOnly = false): MockTelegramChann
   const all = Array.from(g.mockTelegramConfigs.values());
   if (activeOnly) {
     return all.filter((c) => c.isActive);
+  }
+  return all;
+}
+
+// Cuelinks Conversions Sync Helpers
+export function upsertMockConversion(data: {
+  transactionId: string;
+  storeName: string;
+  saleAmount: number;
+  commission: number;
+  status: string;
+  subid?: string | null;
+  userId?: string | null;
+}): { conversion: MockConversionRecord; isNew: boolean } {
+  if (!g.mockConversions) g.mockConversions = new Map();
+  const txId = data.transactionId;
+  const existing = g.mockConversions.get(txId);
+  const now = new Date();
+  const effectiveUserId = data.userId || DEMO_USER.id;
+
+  const normalizedStatus = data.status.toLowerCase();
+  const isApproved = normalizedStatus === "approved" || normalizedStatus === "confirmed" || normalizedStatus === "validated";
+  const isPending = normalizedStatus === "pending" || normalizedStatus === "open";
+
+  const userCommissionPercent = Number(process.env.USER_COMMISSION_PERCENT || 70);
+  const userRatio = Math.max(0, Math.min(100, userCommissionPercent)) / 100;
+  const userEarningsPaise = Math.round(data.commission * 100 * userRatio);
+  const adminProfitPaise = Math.round(data.commission * 100) - userEarningsPaise;
+
+  const userBalances = getUserBalances(effectiveUserId);
+
+  if (existing) {
+    const prevStatus = existing.status.toLowerCase();
+    const prevIsApproved = prevStatus === "approved" || prevStatus === "confirmed" || prevStatus === "validated";
+    const prevIsPending = prevStatus === "pending" || prevStatus === "open";
+    const prevUserEarningsPaise = Math.round(existing.commission * 100 * userRatio);
+
+    if (prevIsApproved) {
+      userBalances.available = Math.max(0, userBalances.available - prevUserEarningsPaise);
+      userBalances.lifetime = Math.max(0, userBalances.lifetime - prevUserEarningsPaise);
+    } else if (prevIsPending) {
+      userBalances.pending = Math.max(0, userBalances.pending - prevUserEarningsPaise);
+      userBalances.lifetime = Math.max(0, userBalances.lifetime - prevUserEarningsPaise);
+    }
+  }
+
+  // Credit new status
+  if (isApproved) {
+    userBalances.available += userEarningsPaise;
+    userBalances.lifetime += userEarningsPaise;
+  } else if (isPending) {
+    userBalances.pending += userEarningsPaise;
+    userBalances.lifetime += userEarningsPaise;
+  }
+
+  // Update demo global balances if applicable
+  if (effectiveUserId === DEMO_USER.id && g.mockBalances) {
+    g.mockBalances.available = userBalances.available;
+    g.mockBalances.pending = userBalances.pending;
+    g.mockBalances.lifetime = userBalances.lifetime;
+  }
+
+  // Record in mockLedger
+  if (!g.mockLedger) g.mockLedger = [];
+  const existingLedgerIdx = g.mockLedger.findIndex((l) => l.externalOrderId === txId);
+  const ledgerStatus: "PENDING" | "CONFIRMED" | "REJECTED" = isApproved
+    ? "CONFIRMED"
+    : isPending
+    ? "PENDING"
+    : "REJECTED";
+
+  const ledgerRow: MockLedgerRow = {
+    id: txId,
+    store: { name: data.storeName },
+    externalOrderId: txId,
+    orderAmountPaise: Math.round(data.saleAmount * 100),
+    userAmountPaise: userEarningsPaise,
+    status: ledgerStatus,
+    createdAt: existing ? existing.createdAt : now,
+  };
+
+  if (existingLedgerIdx >= 0) {
+    g.mockLedger[existingLedgerIdx] = ledgerRow;
+  } else {
+    g.mockLedger.unshift(ledgerRow);
+  }
+
+  // Update admin revenue
+  (g as any).adminRevenuePaise = ((g as any).adminRevenuePaise || 0) + adminProfitPaise;
+
+  const record: MockConversionRecord = {
+    id: existing?.id || "conv-" + Date.now(),
+    transactionId: txId,
+    storeName: data.storeName,
+    saleAmount: data.saleAmount,
+    commission: data.commission,
+    status: data.status,
+    subid: data.subid || null,
+    userId: effectiveUserId,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+
+  g.mockConversions.set(txId, record);
+  return { conversion: record, isNew: !existing };
+}
+
+export function getMockConversions(userId?: string): MockConversionRecord[] {
+  if (!g.mockConversions) g.mockConversions = new Map();
+  const all = Array.from(g.mockConversions.values());
+  if (userId) {
+    return all.filter((c) => c.userId === userId);
   }
   return all;
 }

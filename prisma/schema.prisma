@@ -71,9 +71,10 @@ model User {
   payoutAccount  PayoutAccount?
   telegramConfig TelegramChannelConfig?
   links          GeneratedLink[]
-  clicks        Click[]
-  ledger        EarningsLedger[]
-  withdrawals   Withdrawal[]
+  clicks         Click[]
+  ledger         EarningsLedger[]
+  withdrawals    Withdrawal[]
+  conversions    Conversion[]
 
   @@index([referredById])
 }
@@ -297,4 +298,22 @@ model TelegramChannelConfig {
   updatedAt         DateTime @updatedAt
 
   @@index([telegramUserId])
+}
+
+model Conversion {
+  id            String   @id @default(uuid()) @db.Uuid
+  transactionId String   @unique @map("transaction_id")
+  storeName     String   @map("store_name")
+  saleAmount    Float    @default(0) @map("sale_amount")
+  commission    Float    @default(0)
+  status        String
+  subid         String?
+  userId        String?  @db.Uuid @map("user_id")
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([status])
+  @@map("conversions")
 }
