@@ -49,6 +49,7 @@ describe("Custom URL Shortener & Dynamic Slug Redirects", () => {
     const targetUrl = "https://www.amazon.in/dp/B0CX234XYZ?tag=kamaikaro-21";
     saveMockShortLink({
       slug: testSlug,
+      originalUrl: targetUrl,
       targetUrl,
       userId: "test-user-307",
     });
@@ -60,6 +61,44 @@ describe("Custom URL Shortener & Dynamic Slug Redirects", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(targetUrl);
+    expect(res.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("GET /[slug] strips leading and trailing slashes from params.slug", async () => {
+    const testSlug = "slashdeal";
+    const targetUrl = "https://www.ajio.com/s/shoes-deal";
+    saveMockShortLink({
+      slug: testSlug,
+      originalUrl: targetUrl,
+      targetUrl,
+    });
+
+    const req = new NextRequest(`http://localhost:3000//${testSlug}/`);
+    const res = await slugRedirectGet(req, {
+      params: Promise.resolve({ slug: `//${testSlug}//` }),
+    });
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(targetUrl);
+  });
+
+  it("POST /api/links/shorten handles anonymous creation without userId", async () => {
+    const originalUrl = "https://www.myntra.com/sale/deal123";
+    const req = new NextRequest("http://localhost:3000/api/links/shorten", {
+      method: "POST",
+      body: JSON.stringify({
+        originalUrl,
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const res = await shortenPost(req);
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.slug).toBeDefined();
+    expect(data.shortUrl).toBe(`https://kamaikaro.in/${data.slug}`);
+    expect(data.userId).toBeNull();
   });
 
   it("GET /[slug] redirects unknown slugs to home with link=not-found", async () => {

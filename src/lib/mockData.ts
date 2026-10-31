@@ -1375,6 +1375,7 @@ export function getMockConversions(userId?: string): MockConversionRecord[] {
 export interface MockShortLink {
   id: string;
   slug: string;
+  originalUrl: string;
   targetUrl: string;
   userId?: string | null;
   clickCount: number;
@@ -1384,16 +1385,20 @@ export interface MockShortLink {
 
 export function saveMockShortLink(data: {
   slug: string;
-  targetUrl: string;
+  originalUrl?: string;
+  targetUrl?: string;
   userId?: string | null;
 }): MockShortLink {
   if (!g.mockShortLinks) g.mockShortLinks = new Map();
   const existing = g.mockShortLinks.get(data.slug);
   const now = new Date();
+  const originalUrl = data.originalUrl || data.targetUrl || "";
+  const targetUrl = data.targetUrl || data.originalUrl || "";
   const record: MockShortLink = {
     id: existing?.id || "short-" + Date.now(),
     slug: data.slug,
-    targetUrl: data.targetUrl,
+    originalUrl,
+    targetUrl,
     userId: data.userId || null,
     clickCount: existing?.clickCount || 0,
     createdAt: existing?.createdAt || now,

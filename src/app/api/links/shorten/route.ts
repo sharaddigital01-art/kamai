@@ -12,6 +12,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const ShortenSchema = z.object({
   originalUrl: z.string().trim().min(1, "originalUrl is required"),
@@ -54,7 +55,23 @@ export async function POST(req: Request) {
 
     // Resolve userId: directUserId or authenticated session user
     const sessionUser = await getApiUser().catch(() => null);
-    const targetUserId = directUserId || sessionUser?.id || null;
+    const candidateUserId = directUserId || sessionUser?.id || null;
+
+    // Check if candidateUserId is a valid UUID and exists in DB
+    let validUserId: string | null = null;
+    if (candidateUserId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateUserId)) {
+      if (isDatabaseConfigured()) {
+        try {
+          const userExists = await prisma.user.findUnique({
+            where: { id: candidateUserId },
+            select: { id: true },
+          });
+          if (userExists) validUserId = userExists.id;
+        } catch {}
+      } else {
+        validUserId = candidateUserId;
+      }
+    }
 
     // Generate or use custom 6-character slug
     let slug = customSlug || "";
@@ -98,8 +115,9 @@ export async function POST(req: Request) {
         savedRecord = await prisma.shortLink.create({
           data: {
             slug,
+            originalUrl,
             targetUrl: originalUrl,
-            userId: targetUserId,
+            userId: validUserId,
           },
         });
       } catch (dbErr: any) {
@@ -117,8 +135,9 @@ export async function POST(req: Request) {
     if (!savedRecord) {
       savedRecord = saveMockShortLink({
         slug,
+        originalUrl,
         targetUrl: originalUrl,
-        userId: targetUserId,
+        userId: validUserId,
       });
     }
 
@@ -132,8 +151,9 @@ export async function POST(req: Request) {
         success: true,
         shortUrl,
         slug,
+        originalUrl,
         targetUrl: originalUrl,
-        userId: targetUserId,
+        userId: validUserId,
         id: savedRecord.id,
       },
       { status: 201 }

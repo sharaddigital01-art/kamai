@@ -12,6 +12,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 /** Routes and static assets that should never be treated as short slugs */
 const RESERVED_SLUGS = new Set([
@@ -33,200 +34,159 @@ const RESERVED_SLUGS = new Set([
   "_next",
 ]);
 
-function normalizeDestination(raw: string): URL | null {
-  try {
-    let clean = raw.trim();
-    if (!/^https?:\/\//i.test(clean)) {
-      clean = `https://${clean}`;
-    }
-    const parsed = new URL(clean);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
+function normalizeDestination(raw: string): string {
+  let clean = raw.trim();
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = `https://${clean}`;
   }
+  return clean;
 }
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = await params;
+  const resolvedParams = await params;
+  // Strip leading and trailing slashes from params.slug
+  const rawSlug = resolvedParams?.slug ?? "";
+  const slug = rawSlug.replace(/^\/+|\/+$/g, "").trim();
+
   const home = new URL("/?link=not-found", req.url);
 
   if (!slug || RESERVED_SLUGS.has(slug.toLowerCase())) {
     return NextResponse.redirect(new URL("/", req.url), 302);
   }
 
-  // 1. Fast in-memory TTL cache lookup
-  const cached = getCachedShortUrl(slug);
-  if (cached) {
-    const dest = normalizeDestination(cached);
-    if (dest) {
-      try {
-        after(async () => {
-          if (!isDatabaseConfigured()) {
-            incrementMockShortLinkClick(slug);
-            return;
-          }
-          try {
-            await prisma.shortLink.update({
-              where: { slug },
-              data: { clickCount: { increment: 1 } },
-            });
-          } catch {
-            // ignore tracking failure
-          }
-        });
-      } catch {
-        // Outside request lifecycle (e.g. tests)
-      }
-      return NextResponse.redirect(dest, {
-        status: 307,
-        headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer-when-downgrade" },
+  // 1. Fast in-memory cache check
+  const cachedUrl = getCachedShortUrl(slug);
+  if (cachedUrl) {
+    const dest = normalizeDestination(cachedUrl);
+    try {
+      after(async () => {
+        if (!isDatabaseConfigured()) {
+          incrementMockShortLinkClick(slug);
+          return;
+        }
+        await prisma.shortLink.updateMany({
+          where: { slug },
+          data: { clickCount: { increment: 1 } },
+        }).catch(() => null);
       });
-    }
+    } catch {}
+
+    const res = NextResponse.redirect(dest, 307);
+    res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.headers.set("Pragma", "no-cache");
+    return res;
   }
 
-  // 2. Lookup in ShortLink table / mock
-  let targetUrl: string | null = null;
+  // 2. Find record in database
+  let record: { originalUrl: string } | null = null;
   let isShortLink = false;
 
   if (isDatabaseConfigured()) {
     try {
       const shortRecord = await prisma.shortLink.findUnique({
         where: { slug },
-        select: { id: true, targetUrl: true },
+        select: { id: true, originalUrl: true, targetUrl: true },
       });
       if (shortRecord) {
-        targetUrl = shortRecord.targetUrl;
+        record = { originalUrl: shortRecord.originalUrl || shortRecord.targetUrl || "" };
         isShortLink = true;
       }
     } catch (err) {
-      console.warn("DB lookup error in [slug] for ShortLink:", err);
+      console.warn("Database lookup error in [slug] for ShortLink:", err);
     }
   }
 
-  if (!targetUrl) {
+  if (!record) {
     const mockShort = getMockShortLinkBySlug(slug);
     if (mockShort) {
-      targetUrl = mockShort.targetUrl;
+      record = { originalUrl: mockShort.originalUrl || mockShort.targetUrl };
       isShortLink = true;
     }
   }
 
-  // 3. Fallback: Lookup in GeneratedLink table / mock (by code)
-  let isGeneratedLink = false;
-  let genLinkId: string | null = null;
-
-  if (!targetUrl) {
-    if (isDatabaseConfigured()) {
-      try {
-        const genRecord = await prisma.generatedLink.findUnique({
-          where: { code: slug },
-          select: { id: true, destinationUrl: true },
-        });
-        if (genRecord) {
-          targetUrl = genRecord.destinationUrl;
-          isGeneratedLink = true;
-          genLinkId = genRecord.id;
-        }
-      } catch (err) {
-        console.warn("DB lookup error in [slug] for GeneratedLink:", err);
+  // 3. Fallback: Check GeneratedLink (code: slug)
+  if (!record && isDatabaseConfigured()) {
+    try {
+      const genRecord = await prisma.generatedLink.findUnique({
+        where: { code: slug },
+        select: { id: true, destinationUrl: true, originalUrl: true },
+      });
+      if (genRecord) {
+        record = { originalUrl: genRecord.destinationUrl || genRecord.originalUrl };
       }
-    }
-
-    if (!targetUrl) {
-      const mockGen = getMockLinkByCode(slug);
-      if (mockGen) {
-        targetUrl = mockGen.destinationUrl;
-        isGeneratedLink = true;
-        genLinkId = mockGen.id;
-      }
+    } catch (err) {
+      console.warn("Database lookup error in [slug] for GeneratedLink:", err);
     }
   }
 
-  // 4. Fallback: Lookup in Deal table / mock (by id)
-  if (!targetUrl) {
-    if (isDatabaseConfigured()) {
-      try {
-        const dealRecord = await prisma.deal.findUnique({
-          where: { id: slug },
-          select: { productUrl: true },
-        });
-        if (dealRecord) {
-          targetUrl = dealRecord.productUrl;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!targetUrl) {
-      const mockDeal = getLiveDeals().find((d) => d.id === slug);
-      if (mockDeal) {
-        targetUrl = mockDeal.productUrl;
-      }
+  if (!record) {
+    const mockGen = getMockLinkByCode(slug);
+    if (mockGen) {
+      record = { originalUrl: mockGen.destinationUrl || mockGen.originalUrl };
     }
   }
 
-  // If still not found, redirect to home with not-found query
-  if (!targetUrl) {
-    return NextResponse.redirect(home, 302);
+  // 4. Fallback: Check Deal table (id: slug)
+  if (!record && isDatabaseConfigured()) {
+    try {
+      const dealRecord = await prisma.deal.findUnique({
+        where: { id: slug },
+        select: { productUrl: true },
+      });
+      if (dealRecord?.productUrl) {
+        record = { originalUrl: dealRecord.productUrl };
+      }
+    } catch {}
   }
 
-  const dest = normalizeDestination(targetUrl);
-  if (!dest) {
-    return NextResponse.redirect(home, 302);
+  if (!record) {
+    const mockDeal = getLiveDeals().find((d) => d.id === slug);
+    if (mockDeal?.productUrl) {
+      record = { originalUrl: mockDeal.productUrl };
+    }
   }
 
-  // Cache for future instant redirects
-  setCachedShortUrl(slug, dest.toString());
+  // 5. If found, immediately redirect to record.originalUrl with 307
+  if (record && record.originalUrl) {
+    const dest = normalizeDestination(record.originalUrl);
 
-  // Record click count asynchronously without slowing down redirect
-  try {
-    after(async () => {
-      if (isShortLink) {
-        if (!isDatabaseConfigured()) {
-          incrementMockShortLinkClick(slug);
-          return;
-        }
-        try {
-          await prisma.shortLink.update({
+    // Save in fast cache
+    setCachedShortUrl(slug, dest);
+
+    // Click tracking in background
+    try {
+      after(async () => {
+        if (isShortLink) {
+          if (!isDatabaseConfigured()) {
+            incrementMockShortLinkClick(slug);
+            return;
+          }
+          await prisma.shortLink.updateMany({
             where: { slug },
             data: { clickCount: { increment: 1 } },
-          });
-        } catch {
-          // ignore
-        }
-      } else if (isGeneratedLink) {
-        if (!isDatabaseConfigured()) {
-          incrementMockLinkClick(slug);
-          return;
-        }
-        if (genLinkId) {
-          try {
-            await prisma.generatedLink.update({
-              where: { id: genLinkId },
-              data: { clickCount: { increment: 1 }, lastClickedAt: new Date() },
-            });
-          } catch {
-            // ignore
+          }).catch(() => null);
+        } else {
+          if (!isDatabaseConfigured()) {
+            incrementMockLinkClick(slug);
+            return;
           }
+          await prisma.generatedLink.updateMany({
+            where: { code: slug },
+            data: { clickCount: { increment: 1 }, lastClickedAt: new Date() },
+          }).catch(() => null);
         }
-      }
-    });
-  } catch {
-    // Outside request lifecycle (e.g. tests)
+      });
+    } catch {}
+
+    const response = NextResponse.redirect(dest, 307);
+    response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    response.headers.set("Pragma", "no-cache");
+    return response;
   }
 
-  return NextResponse.redirect(dest, {
-    status: 307,
-    headers: {
-      "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer-when-downgrade",
-    },
-  });
+  // Not found
+  return NextResponse.redirect(home, 302);
 }
