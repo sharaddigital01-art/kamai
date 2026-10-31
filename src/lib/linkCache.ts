@@ -25,3 +25,20 @@ export function setCachedLink(code: string, value: CachedLink) {
   if (cache.size >= MAX) cache.delete(cache.keys().next().value as string);
   cache.set(code, { value, expires: Date.now() + TTL_MS });
 }
+
+const shortUrlCache = new Map<string, { targetUrl: string; expires: number }>();
+
+export function getCachedShortUrl(slug: string): string | undefined {
+  const hit = shortUrlCache.get(slug);
+  if (!hit) return undefined;
+  if (hit.expires < Date.now()) {
+    shortUrlCache.delete(slug);
+    return undefined;
+  }
+  return hit.targetUrl;
+}
+
+export function setCachedShortUrl(slug: string, targetUrl: string) {
+  if (shortUrlCache.size >= MAX) shortUrlCache.delete(shortUrlCache.keys().next().value as string);
+  shortUrlCache.set(slug, { targetUrl, expires: Date.now() + TTL_MS });
+}

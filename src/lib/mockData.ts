@@ -536,6 +536,7 @@ const g = globalThis as unknown as {
   userBalances?: Map<string, Balances>;
   mockTelegramConfigs?: Map<string, MockTelegramChannelConfig>;
   mockConversions?: Map<string, MockConversionRecord>;
+  mockShortLinks?: Map<string, MockShortLink>;
   totalClicks?: number;
   adminRevenuePaise?: number;
 };
@@ -1219,7 +1220,7 @@ export function saveMockTelegramConfig(data: {
     telegramUserId: data.telegramUserId !== undefined ? data.telegramUserId : existing?.telegramUserId || null,
     telegramUsername: data.telegramUsername !== undefined ? data.telegramUsername : existing?.telegramUsername || null,
     sessionString: data.sessionString !== undefined ? data.sessionString : existing?.sessionString || null,
-    sourceChannels: data.sourceChannels !== undefined ? data.sourceChannels : existing?.sourceChannels || DEFAULT_SOURCE_CHANNELS,
+    sourceChannels: data.sourceChannels !== undefined ? data.sourceChannels : existing?.sourceChannels || [],
     targetChannels: data.targetChannels !== undefined ? data.targetChannels : existing?.targetChannels || [],
     targetChannelId: data.targetChannelId !== undefined ? data.targetChannelId : existing?.targetChannelId || null,
     targetChannelName: data.targetChannelName !== undefined ? data.targetChannelName : existing?.targetChannelName || null,
@@ -1241,7 +1242,7 @@ export function getAllMockTelegramConfigs(activeOnly = false): MockTelegramChann
       userId: DEMO_USER.id,
       telegramUserId: "123456789",
       telegramUsername: "demopartner_deals",
-      sourceChannels: DEFAULT_SOURCE_CHANNELS,
+      sourceChannels: [],
       targetChannelId: "@demopartner_deals",
       targetChannelName: "Demo Loot Deals",
       isActive: true,
@@ -1368,4 +1369,50 @@ export function getMockConversions(userId?: string): MockConversionRecord[] {
     return all.filter((c) => c.userId === userId);
   }
   return all;
+}
+
+// Short Links
+export interface MockShortLink {
+  id: string;
+  slug: string;
+  targetUrl: string;
+  userId?: string | null;
+  clickCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export function saveMockShortLink(data: {
+  slug: string;
+  targetUrl: string;
+  userId?: string | null;
+}): MockShortLink {
+  if (!g.mockShortLinks) g.mockShortLinks = new Map();
+  const existing = g.mockShortLinks.get(data.slug);
+  const now = new Date();
+  const record: MockShortLink = {
+    id: existing?.id || "short-" + Date.now(),
+    slug: data.slug,
+    targetUrl: data.targetUrl,
+    userId: data.userId || null,
+    clickCount: existing?.clickCount || 0,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  g.mockShortLinks.set(data.slug, record);
+  return record;
+}
+
+export function getMockShortLinkBySlug(slug: string): MockShortLink | null {
+  if (!g.mockShortLinks) g.mockShortLinks = new Map();
+  return g.mockShortLinks.get(slug) || null;
+}
+
+export function incrementMockShortLinkClick(slug: string): void {
+  if (!g.mockShortLinks) g.mockShortLinks = new Map();
+  const item = g.mockShortLinks.get(slug);
+  if (item) {
+    item.clickCount = (item.clickCount || 0) + 1;
+    item.updatedAt = new Date();
+  }
 }

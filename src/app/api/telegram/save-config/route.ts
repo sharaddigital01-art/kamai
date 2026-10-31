@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     }
 
     // Clean and deduplicate source channels
-    let cleanSourceChannels = DEFAULT_SOURCE_CHANNELS;
+    let cleanSourceChannels: string[] = [];
     if (sourceChannels && Array.isArray(sourceChannels)) {
       cleanSourceChannels = Array.from(
         new Set(

@@ -101,9 +101,9 @@ export async function GET(req: Request) {
     }
 
     const sourceChannels =
-      config?.sourceChannels && Array.isArray(config.sourceChannels) && config.sourceChannels.length > 0
+      config?.sourceChannels && Array.isArray(config.sourceChannels)
         ? config.sourceChannels
-        : DEFAULT_SOURCE_CHANNELS;
+        : [];
 
     const targetChannels =
       config?.targetChannels && Array.isArray(config.targetChannels)

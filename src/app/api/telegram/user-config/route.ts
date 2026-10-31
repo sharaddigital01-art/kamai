@@ -82,9 +82,9 @@ export async function GET(req: Request) {
               telegramUserId: item.telegramUserId || "",
               sessionString: item.sessionString || null,
               sourceChannels:
-                item.sourceChannels && Array.isArray(item.sourceChannels) && item.sourceChannels.length > 0
+                item.sourceChannels && Array.isArray(item.sourceChannels)
                   ? item.sourceChannels
-                  : DEFAULT_SOURCE_CHANNELS,
+                  : [],
               targetChannels: targetChannelsList,
               targetChannelId: item.targetChannelId || null,
               targetChannelName: item.targetChannelName || null,
@@ -115,9 +115,9 @@ export async function GET(req: Request) {
             telegramUserId: item.telegramUserId || "",
             sessionString: item.sessionString || null,
             sourceChannels:
-              item.sourceChannels && Array.isArray(item.sourceChannels) && item.sourceChannels.length > 0
+              item.sourceChannels && Array.isArray(item.sourceChannels)
                 ? item.sourceChannels
-                : DEFAULT_SOURCE_CHANNELS,
+                : [],
             targetChannels: targetChannelsList,
             targetChannelId: item.targetChannelId || null,
             targetChannelName: item.targetChannelName || null,
@@ -312,9 +312,9 @@ export async function GET(req: Request) {
         : "EK_tg");
 
     const sourceChannels =
-      config?.sourceChannels && Array.isArray(config.sourceChannels) && config.sourceChannels.length > 0
+      config?.sourceChannels && Array.isArray(config.sourceChannels)
         ? config.sourceChannels
-        : DEFAULT_SOURCE_CHANNELS;
+        : [];
 
     const targetChannels =
       config?.targetChannels && Array.isArray(config.targetChannels) && config.targetChannels.length > 0
@@ -512,7 +512,7 @@ export async function POST(req: Request) {
       telegramUsername: telegramUsername || savedConfig?.telegramUsername || mockSaved.telegramUsername,
       sessionString: sessionString || savedConfig?.sessionString || mockSaved.sessionString,
       isTelegramConnected: true,
-      sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? DEFAULT_SOURCE_CHANNELS,
+      sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? [],
       targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
       targetChannelId: targetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
       targetChannelName: targetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,

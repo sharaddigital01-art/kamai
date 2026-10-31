@@ -217,7 +217,7 @@ export async function POST(req: Request) {
       telegramUserId: telegramUserId || savedConfig?.telegramUserId || mockSaved.telegramUserId,
       telegramUsername: telegramUsername || savedConfig?.telegramUsername || mockSaved.telegramUsername,
       sessionString: sessionString,
-      sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? DEFAULT_SOURCE_CHANNELS,
+      sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? [],
       targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
       targetChannelId: cleanTargetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
       targetChannelName: cleanTargetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,

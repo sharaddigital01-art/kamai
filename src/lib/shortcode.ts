@@ -13,3 +13,8 @@ export function randomCode(length = 8): string {
   }
   return out;
 }
+
+/** Generates a fast 6-character short slug (base62) */
+export function generateShortSlug(length = 6): string {
+  return randomCode(length);
+}

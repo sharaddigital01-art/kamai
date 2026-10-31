@@ -75,6 +75,7 @@ model User {
   ledger         EarningsLedger[]
   withdrawals    Withdrawal[]
   conversions    Conversion[]
+  shortLinks     ShortLink[]
 
   @@index([referredById])
 }
@@ -318,4 +319,19 @@ model Conversion {
   @@index([userId])
   @@index([status])
   @@map("conversions")
+}
+
+model ShortLink {
+  id         String   @id @default(uuid()) @db.Uuid
+  slug       String   @unique
+  targetUrl  String   @map("target_url")
+  userId     String?  @db.Uuid @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  clickCount Int      @default(0) @map("click_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([slug])
+  @@map("short_links")
 }
