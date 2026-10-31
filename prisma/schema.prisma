@@ -190,25 +190,29 @@ model GeneratedLink {
 }
 
 model Click {
-  id         String        @id @default(uuid()) @db.Uuid
-  linkId     String        @db.Uuid
-  link       GeneratedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  id          String         @id @default(uuid()) @db.Uuid
+  linkId      String?        @db.Uuid
+  link        GeneratedLink? @relation(fields: [linkId], references: [id], onDelete: Cascade)
   /// Denormalised from the link for cheap per-user / per-store reporting
-  userId     String        @db.Uuid
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  storeId    String        @db.Uuid
-  store      PartnerStore  @relation(fields: [storeId], references: [id])
+  userId      String?        @db.Uuid
+  user        User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeId     String?        @db.Uuid
+  store       PartnerStore?  @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  shortLinkId String?        @db.Uuid
+  shortLink   ShortLink?     @relation(fields: [shortLinkId], references: [id], onDelete: SetNull)
+  subId       String?
   /// sha256(dailySalt + ip). Raw IPs are never stored.
-  ipHash     String
-  userAgent  String?
-  referer    String?
-  deviceType String?
-  isBot      Boolean       @default(false)
-  createdAt  DateTime      @default(now())
+  ipHash      String?
+  userAgent   String?
+  referer     String?
+  deviceType  String?
+  isBot       Boolean        @default(false)
+  createdAt   DateTime       @default(now())
 
   @@index([linkId, createdAt])
   @@index([userId, createdAt])
   @@index([storeId, createdAt])
+  @@index([subId])
 }
 
 model EarningsLedger {
@@ -326,13 +330,16 @@ model ShortLink {
   slug        String   @unique
   originalUrl String   @map("original_url")
   targetUrl   String?  @map("target_url")
+  subId       String?
   userId      String?  @db.Uuid @map("user_id")
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   clickCount  Int      @default(0) @map("click_count")
+  clicks      Click[]
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([userId])
   @@index([slug])
+  @@index([subId])
   @@map("short_links")
 }

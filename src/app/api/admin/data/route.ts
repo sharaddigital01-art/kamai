@@ -135,7 +135,7 @@ export async function GET() {
       });
       recentClicks = dbClicks.map((c) => ({
         code: c.link?.code || "direct",
-        store: c.store.name,
+        store: c.store?.name || "Direct",
         timestamp: c.createdAt,
         ip: "192.168.1.***",
       }));

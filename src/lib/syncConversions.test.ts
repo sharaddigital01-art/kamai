@@ -244,4 +244,37 @@ describe("Cuelinks Conversion Sync Engine", () => {
       expect(json.sampleSyncedIds).toContain("tx-route-test-1");
     });
   });
+
+  describe("API Route: /api/sync/cuelinks", () => {
+    it("normalizes status strictly to PAID, PENDING, CANCELLED", async () => {
+      const { normalizeStatus } = await import("@/lib/cuelinksSync");
+      expect(normalizeStatus("approved")).toBe("PAID");
+      expect(normalizeStatus("confirmed")).toBe("PAID");
+      expect(normalizeStatus("PAID")).toBe("PAID");
+      expect(normalizeStatus("1")).toBe("PAID");
+      expect(normalizeStatus("rejected")).toBe("CANCELLED");
+      expect(normalizeStatus("cancelled")).toBe("CANCELLED");
+      expect(normalizeStatus("2")).toBe("CANCELLED");
+      expect(normalizeStatus("pending")).toBe("PENDING");
+      expect(normalizeStatus(null)).toBe("PENDING");
+    });
+
+    it("handles GET and POST queries with channelId 332862 and returns non-cached responses", async () => {
+      const { GET, POST } = await import("@/app/api/sync/cuelinks/route");
+      const getReq = new Request("http://localhost:3000/api/sync/cuelinks?channel_id=332862");
+      const getRes = await GET(getReq);
+      expect(getRes.status).toBe(200);
+      const getJson = await getRes.json();
+      expect(getJson.success).toBe(true);
+      expect(getJson.channelId).toBe("332862");
+      expect(getRes.headers.get("cache-control")).toContain("no-store");
+
+      const postReq = new Request("http://localhost:3000/api/sync/cuelinks", { method: "POST" });
+      const postRes = await POST(postReq);
+      expect(postRes.status).toBe(200);
+      const postJson = await postRes.json();
+      expect(postJson.success).toBe(true);
+      expect(postJson.channelId).toBe("332862");
+    });
+  });
 });

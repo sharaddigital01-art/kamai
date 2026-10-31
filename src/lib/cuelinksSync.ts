@@ -63,6 +63,41 @@ export function slugifyStore(name: string): string {
   return lower.slice(0, 20) || "general";
 }
 
+export function normalizeStatus(
+  rawStatus?: string | number | null
+): "PAID" | "PENDING" | "CANCELLED" {
+  if (rawStatus === undefined || rawStatus === null) return "PENDING";
+  const s = String(rawStatus).toLowerCase().trim();
+
+  if (
+    s === "paid" ||
+    s === "approved" ||
+    s === "confirmed" ||
+    s === "validated" ||
+    s === "1" ||
+    s.includes("approve") ||
+    s.includes("confirm") ||
+    s.includes("paid")
+  ) {
+    return "PAID";
+  }
+
+  if (
+    s === "rejected" ||
+    s === "cancelled" ||
+    s === "canceled" ||
+    s === "declined" ||
+    s === "failed" ||
+    s === "2" ||
+    s.includes("reject") ||
+    s.includes("cancel")
+  ) {
+    return "CANCELLED";
+  }
+
+  return "PENDING";
+}
+
 export function normalizeConversionStatus(
   rawStatus?: string | number | null
 ): "confirmed" | "pending" | "rejected" {
@@ -110,6 +145,20 @@ export async function resolveUserBySubId(subId: string): Promise<string | null> 
       });
       if (link?.userId) return link.userId;
 
+      // 1b. Direct match on ShortLink (subId or slug)
+      const shortLink = await prisma.shortLink.findFirst({
+        where: { OR: [{ subId: cleanSub }, { slug: cleanSub }] },
+        select: { userId: true },
+      });
+      if (shortLink?.userId) return shortLink.userId;
+
+      // 1c. Match on TelegramChannelConfig
+      const tgConfig = await prisma.telegramChannelConfig.findFirst({
+        where: { telegramUserId: cleanSub },
+        select: { userId: true },
+      });
+      if (tgConfig?.userId) return tgConfig.userId;
+
       // 2. Format: `${userId}_${code}`
       if (cleanSub.includes("_")) {
         const potentialId = cleanSub.split("_")[0];
@@ -136,14 +185,17 @@ export async function resolveUserBySubId(subId: string): Promise<string | null> 
         if (u) return u.id;
       }
 
-      // 4. SubIdPrefix or referralCode or prefix before underscore
-      const prefix = cleanSub.includes("_") ? cleanSub.split("_")[0] : cleanSub.slice(0, 8);
+      // 4. SubIdPrefix or referralCode or prefix before underscore / tg suffix
+      const stripped = cleanSub.replace(/_tg$|-tg$|_web$/i, "");
+      const prefix = stripped.includes("_") ? stripped.split("_")[0] : (stripped.slice(0, 8) || cleanSub);
       const userByPrefix = await prisma.user.findFirst({
         where: {
           OR: [
             { subIdPrefix: cleanSub },
+            { subIdPrefix: stripped },
             { subIdPrefix: prefix },
             { referralCode: cleanSub },
+            { referralCode: stripped },
             { referralCode: prefix },
           ],
         },

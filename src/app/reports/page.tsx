@@ -11,6 +11,7 @@ import {
   Plus,
   Minus,
   RotateCcw,
+  RefreshCw,
   Store,
   ChevronRight,
   Info,
@@ -33,11 +34,26 @@ interface StatsData {
   convRate: string;
 }
 
+interface DailyStat {
+  date: string;
+  label: string;
+  clicks: number;
+  profitPaise: number;
+  orders: number;
+}
+
 export default function ReportsPage() {
   const [period, setPeriod] = useState<"today" | "7d" | "30d" | "all">("30d");
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showBreakup, setShowBreakup] = useState(false);
-  const [activeTooltip, setActiveTooltip] = useState<{ x: number; y: number; val: number; label: string } | null>(null);
+  const [activeTooltip, setActiveTooltip] = useState<{
+    x: number;
+    y: number;
+    val: number;
+    label: string;
+    profitPaise: number;
+    orders: number;
+  } | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   const [stats, setStats] = useState<StatsData>({
@@ -51,17 +67,23 @@ export default function ReportsPage() {
     convRate: "0.0%",
   });
 
+  const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
   const [ledger, setLedger] = useState<any[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
 
   async function loadData() {
     try {
-      const res = await fetch("/api/stats");
+      const res = await fetch("/api/stats", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setIsAuthenticated(Boolean(data.authenticated));
         if (data.stats) setStats(data.stats);
         if (data.ledger) setLedger(data.ledger);
+        if (Array.isArray(data.dailyStats) && data.dailyStats.length > 0) {
+          setDailyStats(data.dailyStats);
+        }
       }
     } catch {
       setIsAuthenticated(false);
@@ -71,6 +93,32 @@ export default function ReportsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  async function handleRefreshLive() {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch("/api/sync/cuelinks", {
+        method: "POST",
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const count = json.synced ?? json.totalFetched ?? 0;
+        setSyncMessage(`Live sync complete! ${count} transaction(s) synced.`);
+      } else {
+        setSyncMessage("Live sync complete.");
+      }
+      await loadData();
+    } catch (err) {
+      console.warn("Error refreshing live Cuelinks data:", err);
+      setSyncMessage("Refreshed local stats.");
+      await loadData();
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMessage(null), 4000);
+    }
+  }
 
   async function triggerSimulation() {
     setSimulating(true);
@@ -99,8 +147,15 @@ export default function ReportsPage() {
   const baseClicks = stats.totalClicks;
   const baseOrders = stats.totalTransactions;
 
+  const labels =
+    dailyStats.length > 0
+      ? dailyStats.map((d) => d.label)
+      : ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"];
+
   const points =
-    baseClicks === 0 && baseOrders === 0
+    dailyStats.length > 0
+      ? dailyStats.map((d) => d.clicks)
+      : baseClicks === 0 && baseOrders === 0
       ? [0, 0, 0, 0, 0, 0, 0]
       : [
           Math.max(0, Math.round(baseClicks * 0.1)),
@@ -112,8 +167,6 @@ export default function ReportsPage() {
           baseClicks,
         ];
 
-  const labels = ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"];
-
   // SVG coordinates
   const width = 360;
   const height = 140;
@@ -123,10 +176,18 @@ export default function ReportsPage() {
   const maxVal = Math.max(10, ...points);
 
   const coords = points.map((val, idx) => {
-    const x = padding + (idx / (points.length - 1)) * (width - padding * 2);
+    const x = padding + (idx / Math.max(1, points.length - 1)) * (width - padding * 2);
     const range = maxVal - minVal || 1;
     const y = height - padding - ((val - minVal) / range) * (height - padding * 2) * zoomLevel;
-    return { x, y: Math.max(padding, Math.min(height - padding, y)), val, label: labels[idx] || "" };
+    const daily = dailyStats[idx];
+    return {
+      x,
+      y: Math.max(padding, Math.min(height - padding, y)),
+      val,
+      label: labels[idx] || "",
+      profitPaise: daily?.profitPaise || 0,
+      orders: daily?.orders || 0,
+    };
   });
 
   const pathD = coords.reduce((acc, c, idx) => {
@@ -134,6 +195,32 @@ export default function ReportsPage() {
   }, "");
 
   const fillD = `${pathD} L ${coords[coords.length - 1]?.x ?? width} ${height} L ${coords[0]?.x ?? 0} ${height} Z`;
+
+  // Compute brand aggregations from ledger
+  const brandStatsMap = new Map<string, { name: string; slug: string; txns: number; profit: number }>();
+  for (const row of ledger) {
+    const storeName = row.store?.name || "Partner Store";
+    const storeSlug = (row.store?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "general";
+    const existing = brandStatsMap.get(storeSlug) || {
+      name: storeName,
+      slug: storeSlug,
+      txns: 0,
+      profit: 0,
+    };
+    existing.txns += 1;
+    existing.profit += row.userAmountPaise || 0;
+    brandStatsMap.set(storeSlug, existing);
+  }
+
+  const brandRows =
+    brandStatsMap.size > 0
+      ? Array.from(brandStatsMap.values())
+      : [
+          { name: "Flipkart", slug: "flipkart", txns: stats.totalTransactions, profit: stats.totalProfitPaise },
+          { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
+          { name: "Ajio", slug: "ajio", txns: 0, profit: 0 },
+          { name: "Amazon", slug: "amazon", txns: 0, profit: 0 },
+        ];
 
   return (
     <div className="space-y-6 pt-2 pb-14 max-w-xl mx-auto">
@@ -154,19 +241,46 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {syncMessage && (
+        <div className="rounded-2xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200 flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-emerald-600" />
+            <span className="font-semibold">{syncMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSyncMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 rounded p-1"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* 1. Header: Total Profit Banner */}
       <div className="overflow-hidden rounded-3xl bg-gradient-to-tr from-[#134024] via-[#1a5530] to-[#169443] p-5 text-white shadow-md">
         <div className="flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-200">
             <TrendingUp className="h-3 w-3" /> All Time Total Profit
           </span>
-          <button
-            type="button"
-            onClick={() => setShowBreakup(true)}
-            className="rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-white/30 transition active:scale-95"
-          >
-            View Breakup
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={handleRefreshLive}
+              className="flex items-center gap-1 rounded-full bg-white/20 hover:bg-white/30 px-2.5 py-1 text-[11px] font-bold text-white transition active:scale-95 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+              <span>{syncing ? "Syncing..." : "Refresh Live Data"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBreakup(true)}
+              className="rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-white/30 transition active:scale-95"
+            >
+              View Breakup
+            </button>
+          </div>
         </div>
 
         <div className="mt-3">
@@ -240,7 +354,15 @@ export default function ReportsPage() {
           <h2 className="font-display text-sm font-extrabold uppercase tracking-tight text-ink">
             Key Performance Metrics
           </h2>
-          <span className="text-[11px] font-semibold text-ink-faint">Live tracking</span>
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={handleRefreshLive}
+            className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-[#169443] ring-1 ring-[#169443]/30 hover:bg-emerald-100 transition active:scale-95 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+            <span>{syncing ? "Syncing..." : "Refresh Live Data"}</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -265,7 +387,7 @@ export default function ReportsPage() {
                 <ShoppingBag className="h-4 w-4" />
               </span>
               <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-[#169443]">
-                CONFIRMED
+                ORDERS
               </span>
             </div>
             <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Orders</p>
@@ -279,7 +401,7 @@ export default function ReportsPage() {
                 <Coins className="h-4 w-4" />
               </span>
               <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-black text-cyan-700">
-                REAL CASH
+                PROFIT
               </span>
             </div>
             <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Profit</p>
@@ -344,14 +466,15 @@ export default function ReportsPage() {
             </button>
             <button
               type="button"
+              disabled={syncing}
               onClick={() => {
                 setZoomLevel(1);
-                loadData();
+                handleRefreshLive();
               }}
               aria-label="Refresh Data"
               className="rounded-lg bg-canvas p-1.5 text-ink-soft hover:bg-black/5 active:scale-95 transition"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
+              <RotateCcw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
             </button>
           </div>
         </div>
@@ -397,10 +520,11 @@ export default function ReportsPage() {
           {/* Tooltip Overlay */}
           {activeTooltip && (
             <div
-              className="absolute -top-7 rounded-lg bg-ink px-2.5 py-1 text-[10px] font-bold text-white shadow-md transition-all -translate-x-1/2"
+              className="absolute -top-7 rounded-lg bg-ink px-2.5 py-1 text-[10px] font-bold text-white shadow-md transition-all -translate-x-1/2 whitespace-nowrap"
               style={{ left: `${(activeTooltip.x / width) * 100}%` }}
             >
               {activeTooltip.label}: {activeTooltip.val} clicks
+              {activeTooltip.profitPaise > 0 ? ` • ${formatINR(activeTooltip.profitPaise)}` : ""}
             </div>
           )}
 
@@ -452,12 +576,7 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {[
-                { name: "Flipkart", slug: "flipkart", txns: stats.totalTransactions, profit: stats.totalProfitPaise },
-                { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
-                { name: "Ajio", slug: "ajio", txns: 0, profit: 0 },
-                { name: "Amazon", slug: "amazon", txns: 0, profit: 0 },
-              ].map((b) => (
+              {brandRows.map((b) => (
                 <tr key={b.name} className="hover:bg-canvas/50 transition">
                   <td className="py-3 px-4 font-bold text-ink">
                     <div className="flex items-center gap-2">

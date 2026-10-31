@@ -1420,4 +1420,13 @@ export function incrementMockShortLinkClick(slug: string): void {
     item.clickCount = (item.clickCount || 0) + 1;
     item.updatedAt = new Date();
   }
+  if (g.totalClicks === undefined) g.totalClicks = 0;
+  g.totalClicks += 1;
+  if (!g.mockClicks) g.mockClicks = [];
+  g.mockClicks.unshift({
+    code: slug,
+    timestamp: new Date(),
+    store: "ShortLink",
+    ip: "192.168.1." + Math.floor(Math.random() * 200 + 10),
+  });
 }

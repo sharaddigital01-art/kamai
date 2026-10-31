@@ -64,6 +64,29 @@ describe("Custom URL Shortener & Dynamic Slug Redirects", () => {
     expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
+  it("GET /[slug] increments click count on short link before redirecting", async () => {
+    const testSlug = "clktest";
+    const targetUrl = "https://www.flipkart.com/item/xyz";
+    const link = saveMockShortLink({
+      slug: testSlug,
+      originalUrl: targetUrl,
+      targetUrl,
+      userId: "test-user-clk",
+    });
+    const initialClicks = link.clickCount || 0;
+
+    const req = new NextRequest(`http://localhost:3000/${testSlug}`, {
+      headers: { "user-agent": "Mozilla/5.0" },
+    });
+    const res = await slugRedirectGet(req, {
+      params: Promise.resolve({ slug: testSlug }),
+    });
+
+    expect(res.status).toBe(307);
+    const updated = getMockShortLinkBySlug(testSlug);
+    expect(updated?.clickCount).toBe(initialClicks + 1);
+  });
+
   it("GET /[slug] strips leading and trailing slashes from params.slug", async () => {
     const testSlug = "slashdeal";
     const targetUrl = "https://www.ajio.com/s/shoes-deal";
