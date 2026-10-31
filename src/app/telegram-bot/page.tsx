@@ -77,7 +77,7 @@ export default function TelegramBotPage() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "Kamaikaro_B0T";
+  const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "kamaikaro_bot";
 
   async function loadData() {
     try {
@@ -164,8 +164,8 @@ export default function TelegramBotPage() {
   }, []);
 
   const deepLink = user
-    ? `https://t.me/${botUsername.replace(/^@/, "")}?start=AUTH_${user.id}`
-    : `https://t.me/${botUsername.replace(/^@/, "")}`;
+    ? `https://t.me/kamaikaro_bot?start=AUTH_${user.id}`
+    : `https://t.me/kamaikaro_bot`;
 
   function handleCopyDeepLink() {
     navigator.clipboard?.writeText(deepLink);
