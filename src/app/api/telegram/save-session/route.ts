@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       process.env.TELEGRAM_WORKER_SECRET?.trim() || "kamaikaro-tg-worker-secret-2026";
     const isWorkerAuth = workerSecretHeader === expectedSecret;
 
-    // 2. Identify target user
+    // 2. Identify target user (matching by directUserId OR telegramUserId)
     let user = await getApiUser().catch(() => null);
     let targetUserId = user?.id || directUserId;
 
@@ -69,6 +69,19 @@ export async function POST(req: Request) {
         });
         if (existingCfg) {
           targetUserId = existingCfg.userId;
+        } else {
+          // Check if telegramUserId matches a user's id or subIdPrefix directly
+          const directUser = await prisma.user.findFirst({
+            where: {
+              OR: [
+                { id: /^[0-9a-f-]{36}$/i.test(telegramUserId) ? telegramUserId : undefined },
+                { subIdPrefix: telegramUserId },
+                { referralCode: telegramUserId },
+              ].filter(Boolean) as any,
+            },
+            select: { id: true },
+          });
+          if (directUser) targetUserId = directUser.id;
         }
       } catch (dbErr) {
         console.warn("DB lookup error in save-session:", dbErr);
@@ -79,6 +92,9 @@ export async function POST(req: Request) {
       const mockCfg = getMockTelegramConfigByTelegramId(telegramUserId);
       if (mockCfg) {
         targetUserId = mockCfg.userId;
+      } else {
+        const mockUser = findMockUserById(telegramUserId);
+        if (mockUser) targetUserId = mockUser.id;
       }
     }
 
@@ -169,6 +185,7 @@ export async function POST(req: Request) {
       targetChannelId: cleanTargetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
       targetChannelName: cleanTargetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,
       isActive: true,
+      isTelegramConnected: true,
       connected: true,
     });
   } catch (err: any) {

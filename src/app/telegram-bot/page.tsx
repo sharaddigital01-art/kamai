@@ -77,7 +77,7 @@ export default function TelegramBotPage() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "Kamaikaro_bot";
+  const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "Kamaikaro_B0T";
 
   async function loadData() {
     try {
@@ -92,9 +92,10 @@ export default function TelegramBotPage() {
           if (cfgRes.ok) {
             const cfgData = await cfgRes.json();
 
-            // Connected if: sessionString exists, telegramUserId exists, isActive is true, or cfgData.connected is true
+            // Check user's TelegramChannelConfig by userId. If the user already has a session or active status or telegramUserId, show "Status: Connected" with their live data.
             const isUserConnected = Boolean(
               cfgData.connected ||
+              cfgData.isTelegramConnected ||
               cfgData.sessionString ||
               cfgData.telegramUserId ||
               (cfgData.isActive && (cfgData.targetChannelId || (Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0)))

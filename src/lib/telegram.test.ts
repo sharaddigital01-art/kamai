@@ -160,5 +160,38 @@ describe("Telegram Channel Automation Configuration", () => {
     const matchingCfg = cfgData.configs.find((c: any) => c.userId === testUserId);
     expect(matchingCfg).toBeDefined();
     expect(matchingCfg?.sessionString).toBe(testSession);
+
+    // 5. Test matching by telegramUserId alone
+    const singleReq = new Request("http://localhost:3000/api/telegram/save-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+      body: JSON.stringify({
+        telegramUserId: "987654321",
+        sessionString: "2B_telethon_updated_session_string...",
+        isActive: true,
+      }),
+    });
+    const singleRes = await postSaveSession(singleReq);
+    expect(singleRes.status).toBe(200);
+    const singleData = await singleRes.json();
+    expect(singleData.success).toBe(true);
+    expect(singleData.isTelegramConnected).toBe(true);
+    expect(singleData.userId).toBe(testUserId);
+
+    // 6. Test GET user-config by telegramUserId returns isTelegramConnected
+    const userCfgReq = new Request(`http://localhost:3000/api/telegram/user-config?telegramUserId=987654321`, {
+      method: "GET",
+      headers: {
+        "x-worker-secret": "kamaikaro-tg-worker-secret-2026",
+      },
+    });
+    const userCfgRes = await getUserConfig(userCfgReq);
+    expect(userCfgRes.status).toBe(200);
+    const userCfgData = await userCfgRes.json();
+    expect(userCfgData.connected).toBe(true);
+    expect(userCfgData.isTelegramConnected).toBe(true);
   }, 15000);
 });
