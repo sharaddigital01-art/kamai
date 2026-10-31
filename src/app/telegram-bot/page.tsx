@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Terminal,
   Zap,
+  Tag,
 } from "lucide-react";
 
 interface UserProfile {
@@ -40,6 +41,7 @@ interface TelegramConfig {
   sessionString: string | null;
   targetChannelId: string | null;
   targetChannelName: string | null;
+  amazonTag?: string | null;
   targetChannels?: any[];
   sourceChannels: string[];
   isActive: boolean;
@@ -56,6 +58,7 @@ export default function TelegramBotPage() {
     sessionString: null,
     targetChannelId: "",
     targetChannelName: "",
+    amazonTag: "",
     targetChannels: [],
     sourceChannels: [],
     isActive: true,
@@ -140,6 +143,7 @@ export default function TelegramBotPage() {
               sessionString: cfgData.sessionString || null,
               targetChannelId: targetId,
               targetChannelName: targetName,
+              amazonTag: cfgData.amazonTag || "",
               targetChannels: cfgData.targetChannels || [],
               sourceChannels: formattedSource,
               isActive: cfgData.isActive !== undefined ? cfgData.isActive : true,
@@ -228,6 +232,7 @@ export default function TelegramBotPage() {
           targetChannelId: config.targetChannelId?.trim() || null,
           targetChannelName: config.targetChannelName?.trim() || null,
           sourceChannels: config.sourceChannels,
+          amazonTag: config.amazonTag?.trim() || null,
           isActive: config.isActive,
         }),
       });
@@ -598,6 +603,39 @@ export default function TelegramBotPage() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Amazon Associates Tag (Optional) */}
+        <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
+          <div className="bg-canvas/50 px-5 py-3 text-[11px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Tag className="h-3.5 w-3.5 text-amber-600" />
+              <span>Direct Amazon Affiliate Tag</span>
+            </div>
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200/80 rounded-full px-2 py-0.5">
+              Optional
+            </span>
+          </div>
+
+          <div className="p-5 space-y-3">
+            <div>
+              <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
+                Amazon Associates Tag (Optional)
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="e.g. yourtag-21"
+                  value={config.amazonTag || ""}
+                  onChange={(e) => setConfig((p) => ({ ...p, amazonTag: e.target.value }))}
+                  className="w-full rounded-2xl bg-[#F4F6F5] py-3 px-4 text-sm font-medium text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition font-mono"
+                />
+              </div>
+              <p className="mt-2 text-xs text-ink-soft leading-relaxed">
+                Agar aap apna direct Amazon affiliate tag daalenge, toh Amazon ki saari deals Cuelinks ke bajay direct aapke Amazon tag se convert hongi.
+              </p>
+            </div>
           </div>
         </div>
 

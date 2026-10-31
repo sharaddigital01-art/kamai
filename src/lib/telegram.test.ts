@@ -194,4 +194,47 @@ describe("Telegram Channel Automation Configuration", () => {
     expect(userCfgData.connected).toBe(true);
     expect(userCfgData.isTelegramConnected).toBe(true);
   }, 15000);
+
+  it("persists and returns custom amazonTag in user-config and save-config APIs", async () => {
+    const { POST: postUserConfig, GET: getUserConfig } = await import("@/app/api/telegram/user-config/route");
+    const { POST: postSaveConfig } = await import("@/app/api/telegram/save-config/route");
+
+    // 1. Save via save-config
+    const saveReq = new Request("http://localhost:3000/api/telegram/save-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: testUserId,
+        targetChannelId: "@my_exclusive_loot",
+        amazonTag: "sharad00108-21",
+        isActive: true,
+      }),
+    });
+    const saveRes = await postSaveConfig(saveReq);
+    expect(saveRes.status).toBe(200);
+    const saveData = await saveRes.json();
+    expect(saveData.success).toBe(true);
+    expect(saveData.config.amazonTag).toBe("sharad00108-21");
+
+    // 2. Retrieve via user-config GET
+    const getReq = new Request(`http://localhost:3000/api/telegram/user-config?userId=${testUserId}`);
+    const getRes = await getUserConfig(getReq);
+    expect(getRes.status).toBe(200);
+    const getData = await getRes.json();
+    expect(getData.amazonTag).toBe("sharad00108-21");
+
+    // 3. Update via user-config POST
+    const postReq = new Request("http://localhost:3000/api/telegram/user-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId: testUserId,
+        amazonTag: "updatedtag-21",
+      }),
+    });
+    const postRes = await postUserConfig(postReq);
+    expect(postRes.status).toBe(200);
+    const postData = await postRes.json();
+    expect(postData.amazonTag).toBe("updatedtag-21");
+  });
 });

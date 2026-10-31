@@ -300,6 +300,7 @@ model TelegramChannelConfig {
   targetChannels    Json?    @default("[]")
   targetChannelId   String?
   targetChannelName String?
+  amazonTag         String?
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

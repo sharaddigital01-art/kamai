@@ -16,6 +16,7 @@ const SaveConfigSchema = z.object({
   targetChannelId: z.string().trim().optional().nullable(),
   targetChannelName: z.string().trim().optional().nullable(),
   sourceChannels: z.array(z.string().trim()).optional(),
+  amazonTag: z.string().trim().optional().nullable(),
   isActive: z.boolean().optional(),
   disconnect: z.boolean().optional(),
 });
@@ -46,12 +47,13 @@ export async function POST(req: Request) {
       targetChannelId,
       targetChannelName,
       sourceChannels,
+      amazonTag,
       isActive,
       disconnect,
     } = result.data;
 
     // Identify user
-    let user = await getApiUser();
+    let user = await getApiUser().catch(() => null);
     let targetUserId = user?.id || directUserId;
 
     if (!targetUserId) {
@@ -104,6 +106,7 @@ export async function POST(req: Request) {
               targetChannelId: cleanTargetChannelId !== undefined ? cleanTargetChannelId : existing?.targetChannelId,
               targetChannelName: targetChannelName !== undefined ? targetChannelName : existing?.targetChannelName,
               sourceChannels: cleanSourceChannels,
+              ...(amazonTag !== undefined ? { amazonTag: amazonTag?.trim() || null } : {}),
               isActive: isActive !== undefined ? isActive : existing?.isActive ?? true,
               updatedAt: new Date(),
             },
@@ -112,6 +115,7 @@ export async function POST(req: Request) {
               targetChannelId: cleanTargetChannelId,
               targetChannelName: targetChannelName || null,
               sourceChannels: cleanSourceChannels,
+              amazonTag: amazonTag?.trim() || null,
               isActive: isActive !== undefined ? isActive : true,
             },
           });
@@ -134,6 +138,7 @@ export async function POST(req: Request) {
           targetChannelId: cleanTargetChannelId,
           targetChannelName,
           sourceChannels: cleanSourceChannels,
+          amazonTag: amazonTag !== undefined ? (amazonTag?.trim() || null) : undefined,
           isActive,
         });
       }
@@ -152,6 +157,7 @@ export async function POST(req: Request) {
         targetChannelId: updatedConfig.targetChannelId,
         targetChannelName: updatedConfig.targetChannelName,
         sourceChannels: updatedConfig.sourceChannels,
+        amazonTag: updatedConfig.amazonTag || null,
         isActive: updatedConfig.isActive,
       },
     });

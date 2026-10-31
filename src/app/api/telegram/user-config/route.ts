@@ -57,6 +57,7 @@ export async function GET(req: Request) {
         targetChannels: any;
         targetChannelId: string | null;
         targetChannelName: string | null;
+        amazonTag: string | null;
         trackingSubId: string;
         isActive: boolean;
       }> = [];
@@ -88,6 +89,7 @@ export async function GET(req: Request) {
               targetChannels: targetChannelsList,
               targetChannelId: item.targetChannelId || null,
               targetChannelName: item.targetChannelName || null,
+              amazonTag: item.amazonTag || null,
               trackingSubId: `${subIdPrefix}_tg`,
               isActive: item.isActive,
             });
@@ -121,6 +123,7 @@ export async function GET(req: Request) {
             targetChannels: targetChannelsList,
             targetChannelId: item.targetChannelId || null,
             targetChannelName: item.targetChannelName || null,
+            amazonTag: item.amazonTag || null,
             trackingSubId: `${subIdPrefix}_tg`,
             isActive: item.isActive,
           });
@@ -331,6 +334,7 @@ export async function GET(req: Request) {
       targetChannels,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
+      amazonTag: config?.amazonTag || null,
       trackingSubId: userTrackingSubId,
       subId: userTrackingSubId,
       isActive: config?.isActive !== undefined ? config.isActive : true,
@@ -344,6 +348,7 @@ export async function GET(req: Request) {
       trackingSubId: userTrackingSubId,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
+      amazonTag: config?.amazonTag || null,
       sourceChannels,
       targetChannels,
       sessionString: config?.sessionString || null,
@@ -395,6 +400,7 @@ export async function POST(req: Request) {
       targetChannels,
       targetChannelId,
       targetChannelName,
+      amazonTag,
       isActive = true,
     } = json;
 
@@ -469,6 +475,7 @@ export async function POST(req: Request) {
             targetChannels: targetChannels !== undefined ? (targetChannels as any) : undefined,
             targetChannelId: targetChannelId || null,
             targetChannelName: targetChannelName || null,
+            amazonTag: amazonTag !== undefined ? (amazonTag?.trim() || null) : null,
             isActive: true,
           },
           update: {
@@ -479,6 +486,7 @@ export async function POST(req: Request) {
             ...(targetChannels !== undefined ? { targetChannels: targetChannels as any } : {}),
             ...(targetChannelId !== undefined ? { targetChannelId } : {}),
             ...(targetChannelName !== undefined ? { targetChannelName } : {}),
+            ...(amazonTag !== undefined ? { amazonTag: amazonTag?.trim() || null } : {}),
             isActive: true,
             updatedAt: new Date(),
           },
@@ -497,6 +505,7 @@ export async function POST(req: Request) {
       targetChannels: targetChannels !== undefined ? targetChannels : undefined,
       targetChannelId,
       targetChannelName,
+      amazonTag: amazonTag !== undefined ? (amazonTag?.trim() || null) : undefined,
       isActive: true,
     });
 
@@ -516,6 +525,7 @@ export async function POST(req: Request) {
       targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
       targetChannelId: targetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
       targetChannelName: targetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,
+      amazonTag: savedConfig?.amazonTag ?? (amazonTag !== undefined ? (amazonTag?.trim() || null) : (mockSaved.amazonTag || null)),
     });
   } catch (err: any) {
     console.error("POST user-config error:", err);

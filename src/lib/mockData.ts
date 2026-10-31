@@ -505,6 +505,7 @@ export interface MockTelegramChannelConfig {
   targetChannels?: any;
   targetChannelId: string | null;
   targetChannelName: string | null;
+  amazonTag?: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -1209,6 +1210,7 @@ export function saveMockTelegramConfig(data: {
   targetChannels?: any;
   targetChannelId?: string | null;
   targetChannelName?: string | null;
+  amazonTag?: string | null;
   isActive?: boolean;
 }): MockTelegramChannelConfig {
   if (!g.mockTelegramConfigs) g.mockTelegramConfigs = new Map();
@@ -1224,6 +1226,7 @@ export function saveMockTelegramConfig(data: {
     targetChannels: data.targetChannels !== undefined ? data.targetChannels : existing?.targetChannels || [],
     targetChannelId: data.targetChannelId !== undefined ? data.targetChannelId : existing?.targetChannelId || null,
     targetChannelName: data.targetChannelName !== undefined ? data.targetChannelName : existing?.targetChannelName || null,
+    amazonTag: data.amazonTag !== undefined ? data.amazonTag : existing?.amazonTag || null,
     isActive: data.isActive !== undefined ? data.isActive : (existing?.isActive !== undefined ? existing.isActive : true),
     createdAt: existing?.createdAt || new Date(),
     updatedAt: new Date(),
@@ -1245,6 +1248,7 @@ export function getAllMockTelegramConfigs(activeOnly = false): MockTelegramChann
       sourceChannels: [],
       targetChannelId: "@demopartner_deals",
       targetChannelName: "Demo Loot Deals",
+      amazonTag: null,
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
