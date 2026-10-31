@@ -202,7 +202,11 @@ export async function GET(req: Request) {
       }
     }
 
-    const isConnected = Boolean(config?.telegramUserId);
+    const isConnected = Boolean(
+      config?.sessionString ||
+      config?.telegramUserId ||
+      (config?.isActive && (config?.targetChannelId || (Array.isArray(config?.targetChannels) && config.targetChannels.length > 0)))
+    );
     const trackingSubId = user ? `${user.subIdPrefix || "EK"}_tg` : null;
 
     const sourceChannels =

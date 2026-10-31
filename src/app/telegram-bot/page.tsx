@@ -37,8 +37,10 @@ interface TelegramConfig {
   id?: string;
   telegramUserId: string | null;
   telegramUsername: string | null;
+  sessionString: string | null;
   targetChannelId: string | null;
   targetChannelName: string | null;
+  targetChannels?: any[];
   sourceChannels: string[];
   isActive: boolean;
 }
@@ -51,8 +53,10 @@ export default function TelegramBotPage() {
   const [config, setConfig] = useState<TelegramConfig>({
     telegramUserId: null,
     telegramUsername: null,
+    sessionString: null,
     targetChannelId: "",
     targetChannelName: "",
+    targetChannels: [],
     sourceChannels: [],
     isActive: true,
   });
@@ -87,15 +91,57 @@ export default function TelegramBotPage() {
           const cfgRes = await fetch(`/api/telegram/user-config?userId=${encodeURIComponent(authData.user.id)}`);
           if (cfgRes.ok) {
             const cfgData = await cfgRes.json();
-            setConnected(Boolean(cfgData.connected && cfgData.telegramUserId));
+
+            // Connected if: sessionString exists, telegramUserId exists, isActive is true, or cfgData.connected is true
+            const isUserConnected = Boolean(
+              cfgData.connected ||
+              cfgData.sessionString ||
+              cfgData.telegramUserId ||
+              (cfgData.isActive && (cfgData.targetChannelId || (Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0)))
+            );
+            setConnected(isUserConnected);
+
+            // Format source channels cleanly (supports both strings and JSON objects from Telegram dialogs)
+            let rawSource = cfgData.sourceChannels || [];
+            if (!Array.isArray(rawSource)) rawSource = [];
+            const formattedSource = rawSource
+              .map((c: any) => {
+                if (typeof c === "string") return c;
+                if (!c) return "";
+                if (c.username) return `@${c.username.replace(/^@/, "")}`;
+                if (c.title) return c.title;
+                if (c.id) return String(c.id);
+                return "";
+              })
+              .filter(Boolean);
+
+            // Extract target channel if stored in targetChannels or direct fields
+            let targetId = cfgData.targetChannelId || "";
+            let targetName = cfgData.targetChannelName || "";
+            if (!targetId && Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0) {
+              const firstTgt = cfgData.targetChannels[0];
+              if (typeof firstTgt === "string") {
+                targetId = firstTgt;
+                targetName = firstTgt;
+              } else if (firstTgt && typeof firstTgt === "object") {
+                targetId = firstTgt.username
+                  ? `@${firstTgt.username.replace(/^@/, "")}`
+                  : String(firstTgt.id || "");
+                targetName = firstTgt.title || targetId;
+              }
+            }
+
             setConfig({
-              telegramUserId: cfgData.telegramUserId,
-              telegramUsername: cfgData.telegramUsername,
-              targetChannelId: cfgData.targetChannelId || "",
-              targetChannelName: cfgData.targetChannelName || "",
-              sourceChannels: cfgData.sourceChannels || [],
+              telegramUserId: cfgData.telegramUserId || null,
+              telegramUsername: cfgData.telegramUsername || null,
+              sessionString: cfgData.sessionString || null,
+              targetChannelId: targetId,
+              targetChannelName: targetName,
+              targetChannels: cfgData.targetChannels || [],
+              sourceChannels: formattedSource,
               isActive: cfgData.isActive !== undefined ? cfgData.isActive : true,
             });
+
             if (cfgData.defaultSourceChannels) {
               setPresetChannels(cfgData.defaultSourceChannels);
             }
@@ -189,6 +235,7 @@ export default function TelegramBotPage() {
         setFeedback({ type: "error", text: data.error || "Failed to save settings." });
       } else {
         setFeedback({ type: "success", text: "Settings saved successfully! Bot sync updated." });
+        setConnected(true);
         setTimeout(() => setFeedback(null), 4000);
       }
     } catch {
@@ -219,6 +266,8 @@ export default function TelegramBotPage() {
           ...prev,
           telegramUserId: null,
           telegramUsername: null,
+          sessionString: null,
+          isActive: false,
         }));
         setFeedback({ type: "success", text: "Telegram account unlinked successfully." });
       } else {
@@ -334,10 +383,24 @@ export default function TelegramBotPage() {
             </span>
           </div>
 
-          {connected && config.telegramUsername && (
-            <span className="rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-mono font-bold text-sky-200 ring-1 ring-white/30">
-              @{config.telegramUsername}
-            </span>
+          {connected && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {config.sessionString && (
+                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-mono font-bold text-emerald-300 ring-1 ring-emerald-500/30">
+                  Session Active
+                </span>
+              )}
+              {config.telegramUsername && (
+                <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-mono font-bold text-sky-200 ring-1 ring-white/30">
+                  @{config.telegramUsername}
+                </span>
+              )}
+              {config.telegramUserId && !config.telegramUsername && (
+                <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-mono text-sky-200 ring-1 ring-white/30">
+                  ID: {config.telegramUserId}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -363,7 +426,7 @@ export default function TelegramBotPage() {
       {/* SECTION 1: Connect Telegram Bot */}
       <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
         <div className="bg-canvas/50 px-5 py-3 text-[11px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5 flex items-center justify-between">
-          <span>Step 1 · Bot Connection</span>
+          <span>Step 1 · Bot Connection & Login</span>
           <span className="font-mono text-[10px] text-ink-soft">@{botUsername}</span>
         </div>
 
@@ -404,36 +467,65 @@ export default function TelegramBotPage() {
                 </p>
                 <ol className="list-decimal pl-5 space-y-1 text-sky-900 text-[11px]">
                   <li>Click <strong>&quot;Open in Telegram&quot;</strong> above to chat with @{botUsername}.</li>
-                  <li>Click <strong>&quot;START&quot;</strong> in Telegram to auto-link your account.</li>
+                  <li>Click <strong>&quot;START&quot;</strong> or send <code>/login</code> in Telegram to log in and select your channels.</li>
                   <li>Add @{botUsername} as an <strong>Administrator</strong> in your deal channel with &quot;Post Messages&quot; permission.</li>
                 </ol>
               </div>
             </>
           ) : (
             <div className="space-y-3">
-              <div className="flex items-center justify-between rounded-2xl bg-emerald-50/80 p-4 ring-1 ring-emerald-200">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-emerald-50/80 p-4 ring-1 ring-emerald-200">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm mt-0.5">
                     <CheckCircle2 className="h-5 w-5" />
                   </span>
                   <div>
-                    <h4 className="font-bold text-sm text-ink">
-                      {config.telegramUsername ? `@${config.telegramUsername}` : "Telegram User"} Connected
+                    <h4 className="font-bold text-sm text-ink flex items-center gap-2">
+                      <span>
+                        {config.telegramUsername
+                          ? `@${config.telegramUsername}`
+                          : config.telegramUserId
+                          ? `Telegram User (${config.telegramUserId})`
+                          : "Telegram Automation Linked"}
+                      </span>
+                      <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                        Connected
+                      </span>
                     </h4>
-                    <p className="text-[11px] text-ink-soft font-mono">
-                      Telegram ID: {config.telegramUserId} · Tracking SubID: {user.subIdPrefix}_tg
+                    <p className="text-[11px] text-ink-soft font-mono mt-0.5">
+                      {config.telegramUserId ? `ID: ${config.telegramUserId} · ` : ""}
+                      SubID: <strong className="text-ink">{user.subIdPrefix}_tg</strong>
+                      {config.sessionString ? " · Telethon Session: Active" : ""}
                     </p>
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-ink-soft ring-1 ring-black/5">
+                        {config.sourceChannels.length} Source Channels
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-ink-soft ring-1 ring-black/5">
+                        Target: {config.targetChannelName || config.targetChannelId || "Configured"}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleDisconnectBot}
-                  disabled={disconnecting}
-                  className="rounded-xl px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100/70 active:scale-95 transition ring-1 ring-red-200"
-                >
-                  {disconnecting ? "Unlinking..." : "Unlink"}
-                </button>
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <a
+                    href={deepLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-xl px-3 py-1.5 text-xs font-bold text-[#0088cc] hover:bg-sky-100/70 active:scale-95 transition ring-1 ring-sky-200"
+                  >
+                    Open Bot
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleDisconnectBot}
+                    disabled={disconnecting}
+                    className="rounded-xl px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100/70 active:scale-95 transition ring-1 ring-red-200"
+                  >
+                    {disconnecting ? "Unlinking..." : "Unlink"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -480,6 +572,29 @@ export default function TelegramBotPage() {
                 className="w-full rounded-2xl bg-[#F4F6F5] py-2.5 px-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
               />
             </div>
+
+            {/* Display target channels list if multiple are configured */}
+            {Array.isArray(config.targetChannels) && config.targetChannels.length > 0 && (
+              <div className="pt-2 border-t border-black/5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-ink-soft block mb-1.5">
+                  Saved Bot Target Channels:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {config.targetChannels.map((tgt: any, idx: number) => {
+                    const title = typeof tgt === "string" ? tgt : (tgt.title || tgt.username || tgt.id);
+                    return (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200"
+                      >
+                        <Radio className="h-3 w-3 text-emerald-600" />
+                        <span>{title}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

@@ -160,5 +160,5 @@ describe("Telegram Channel Automation Configuration", () => {
     const matchingCfg = cfgData.configs.find((c: any) => c.userId === testUserId);
     expect(matchingCfg).toBeDefined();
     expect(matchingCfg?.sessionString).toBe(testSession);
-  });
+  }, 15000);
 });

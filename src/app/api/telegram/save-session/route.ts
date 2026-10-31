@@ -8,6 +8,7 @@ import {
   getMockTelegramConfigByTelegramId,
   getMockTelegramConfigByUserId,
   findMockUserById,
+  DEFAULT_SOURCE_CHANNELS,
   DEMO_USER,
 } from "@/lib/mockData";
 
@@ -18,6 +19,10 @@ const SaveSessionSchema = z.object({
   userId: z.string().trim().optional(),
   telegramUserId: z.union([z.string(), z.number()]).optional(),
   telegramUsername: z.string().trim().optional().nullable(),
+  sourceChannels: z.any().optional(),
+  targetChannels: z.any().optional(),
+  targetChannelId: z.string().trim().optional().nullable(),
+  targetChannelName: z.string().trim().optional().nullable(),
   isActive: z.boolean().optional(),
 });
 
@@ -37,6 +42,10 @@ export async function POST(req: Request) {
       userId: directUserId,
       telegramUserId: rawTelegramUserId,
       telegramUsername,
+      sourceChannels,
+      targetChannels,
+      targetChannelId,
+      targetChannelName,
       isActive = true,
     } = result.data;
 
@@ -85,7 +94,22 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Save session string to database
+    // Determine targetChannelId and Name from targetChannels if provided
+    let cleanTargetChannelId = targetChannelId || null;
+    let cleanTargetChannelName = targetChannelName || null;
+
+    if (!cleanTargetChannelId && Array.isArray(targetChannels) && targetChannels.length > 0) {
+      const firstTarget = targetChannels[0];
+      if (typeof firstTarget === "string") {
+        cleanTargetChannelId = firstTarget;
+        cleanTargetChannelName = firstTarget;
+      } else if (firstTarget && typeof firstTarget === "object") {
+        cleanTargetChannelId = String(firstTarget.id || firstTarget.username || "");
+        cleanTargetChannelName = firstTarget.title || cleanTargetChannelId;
+      }
+    }
+
+    // 3. Save session string and channels to database
     let savedConfig: any = null;
 
     if (isDatabaseConfigured()) {
@@ -97,13 +121,21 @@ export async function POST(req: Request) {
             telegramUserId: telegramUserId || null,
             telegramUsername: telegramUsername || null,
             sessionString,
-            isActive,
+            sourceChannels: sourceChannels !== undefined ? (sourceChannels as any) : undefined,
+            targetChannels: targetChannels !== undefined ? (targetChannels as any) : undefined,
+            targetChannelId: cleanTargetChannelId,
+            targetChannelName: cleanTargetChannelName,
+            isActive: true,
           },
           update: {
             sessionString,
             ...(telegramUserId ? { telegramUserId } : {}),
             ...(telegramUsername !== undefined ? { telegramUsername } : {}),
-            isActive,
+            ...(sourceChannels !== undefined ? { sourceChannels: sourceChannels as any } : {}),
+            ...(targetChannels !== undefined ? { targetChannels: targetChannels as any } : {}),
+            ...(cleanTargetChannelId !== null ? { targetChannelId: cleanTargetChannelId } : {}),
+            ...(cleanTargetChannelName !== null ? { targetChannelName: cleanTargetChannelName } : {}),
+            isActive: true,
             updatedAt: new Date(),
           },
         });
@@ -118,15 +150,26 @@ export async function POST(req: Request) {
       telegramUserId: telegramUserId || undefined,
       telegramUsername: telegramUsername || undefined,
       sessionString,
-      isActive,
+      sourceChannels: sourceChannels !== undefined ? sourceChannels : undefined,
+      targetChannels: targetChannels !== undefined ? targetChannels : undefined,
+      targetChannelId: cleanTargetChannelId,
+      targetChannelName: cleanTargetChannelName,
+      isActive: true,
     });
 
     return NextResponse.json({
       success: true,
-      message: "Telegram session string stored successfully",
+      message: "Telegram session and channel configuration saved successfully",
       userId: targetUserId,
       telegramUserId: telegramUserId || savedConfig?.telegramUserId || mockSaved.telegramUserId,
-      isActive: savedConfig?.isActive ?? mockSaved.isActive,
+      telegramUsername: telegramUsername || savedConfig?.telegramUsername || mockSaved.telegramUsername,
+      sessionString: sessionString,
+      sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? DEFAULT_SOURCE_CHANNELS,
+      targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
+      targetChannelId: cleanTargetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
+      targetChannelName: cleanTargetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,
+      isActive: true,
+      connected: true,
     });
   } catch (err: any) {
     console.error("save-session error:", err);
