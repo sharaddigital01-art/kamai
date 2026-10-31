@@ -14,16 +14,20 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const activeOnly = searchParams.get("activeOnly") === "true";
     const queryTelegramId = (
-      searchParams.get("telegramUserId") || searchParams.get("telegramId")
+      searchParams.get("telegramUserId") ||
+      searchParams.get("telegramId") ||
+      searchParams.get("tgId")
     )?.trim();
     const queryUserId = (
-      searchParams.get("userId") || searchParams.get("id")
+      searchParams.get("userId") ||
+      searchParams.get("id")
     )?.trim();
 
     // 1. Shared secret worker authentication header
@@ -129,11 +133,38 @@ export async function GET(req: Request) {
       });
     }
 
-    // 3. Single User Lookup: queryTelegramId OR queryUserId OR logged-in session user
+    // 3. Single User Lookup: queryUserId OR queryTelegramId OR logged-in session user
     let user: any = null;
     let config: any = null;
+    let targetUserId = queryUserId;
 
-    if (queryTelegramId) {
+    if (queryUserId) {
+      if (isDatabaseConfigured()) {
+        try {
+          config = await prisma.telegramChannelConfig.findUnique({
+            where: { userId: queryUserId },
+            include: { user: true },
+          });
+          if (config?.user) {
+            user = config.user;
+          } else {
+            user = await prisma.user.findUnique({ where: { id: queryUserId } });
+          }
+        } catch (dbErr) {
+          console.warn("DB lookup fallback in user-config by userId:", dbErr);
+        }
+      }
+
+      if (!user) {
+        user = findMockUserById(queryUserId);
+      }
+
+      if (!config && user) {
+        config = getMockTelegramConfigByUserId(user.id);
+      }
+    }
+
+    if (!config && queryTelegramId) {
       if (isDatabaseConfigured()) {
         try {
           config = await prisma.telegramChannelConfig.findFirst({
@@ -142,6 +173,7 @@ export async function GET(req: Request) {
           });
           if (config?.user) {
             user = config.user;
+            targetUserId = config.userId;
           }
         } catch (dbErr) {
           console.warn("DB lookup fallback in user-config by telegramId:", dbErr);
@@ -152,6 +184,7 @@ export async function GET(req: Request) {
         config = getMockTelegramConfigByTelegramId(queryTelegramId);
         if (config) {
           user = findMockUserById(config.userId);
+          targetUserId = config.userId;
         }
       }
 
@@ -165,7 +198,6 @@ export async function GET(req: Request) {
             });
             if (config) {
               user = config.user;
-              // Link telegramUserId if not yet attached or different
               if (config.telegramUserId !== queryTelegramId) {
                 config = await prisma.telegramChannelConfig.update({
                   where: { userId: queryUserId },
@@ -205,67 +237,79 @@ export async function GET(req: Request) {
           }
         }
       }
+    }
 
-      if (!config || !user) {
-        return NextResponse.json(
-          {
-            error: `No linked account found for Telegram ID '${queryTelegramId}'. Please send /start in the bot with your account link.`,
-            connected: false,
-            isTelegramConnected: false,
-          },
-          { status: 404 }
-        );
-      }
-    } else {
-      let targetUserId = queryUserId;
+    if (!config && !user) {
       if (!targetUserId && !isHeaderAuth) {
         const sessionUser = await getApiUser().catch(() => null);
         targetUserId = sessionUser?.id;
-      }
-
-      if (!targetUserId && !isHeaderAuth) {
-        return NextResponse.json(
-          { error: "Authentication required or missing userId parameter." },
-          { status: 401 }
-        );
       }
 
       if (!targetUserId && isHeaderAuth) {
         targetUserId = DEMO_USER.id;
       }
 
-      if (isDatabaseConfigured()) {
-        try {
-          config = await prisma.telegramChannelConfig.findUnique({
-            where: { userId: targetUserId },
-            include: { user: true },
-          });
-          if (config?.user) {
-            user = config.user;
-          } else {
-            user = await prisma.user.findUnique({ where: { id: targetUserId } });
+      if (targetUserId) {
+        if (isDatabaseConfigured()) {
+          try {
+            config = await prisma.telegramChannelConfig.findUnique({
+              where: { userId: targetUserId },
+              include: { user: true },
+            });
+            if (config?.user) {
+              user = config.user;
+            } else {
+              user = await prisma.user.findUnique({ where: { id: targetUserId } });
+            }
+          } catch (dbErr) {
+            console.warn("DB lookup fallback in user-config by targetUserId:", dbErr);
           }
-        } catch (dbErr) {
-          console.warn("DB lookup fallback in user-config by userId:", dbErr);
+        }
+
+        if (!user) {
+          user = findMockUserById(targetUserId);
+        }
+
+        if (!config && user) {
+          config = getMockTelegramConfigByUserId(user.id);
         }
       }
+    }
 
-      if (!user) {
-        user = findMockUserById(targetUserId!);
-      }
+    if (!config && !user && queryTelegramId) {
+      return NextResponse.json(
+        {
+          error: `No linked account found for Telegram ID '${queryTelegramId}'. Please send /start in the bot with your account link.`,
+          connected: false,
+          isTelegramConnected: false,
+        },
+        { status: 404 }
+      );
+    }
 
-      if (!config && user) {
-        config = getMockTelegramConfigByUserId(user.id);
-      }
+    if (!targetUserId && !config && !user) {
+      return NextResponse.json(
+        { error: "Authentication required or missing userId parameter." },
+        { status: 401 }
+      );
     }
 
     const isConnected = Boolean(
       config?.sessionString ||
       config?.telegramUserId ||
-      (config?.isActive && (config?.targetChannelId || (Array.isArray(config?.targetChannels) && config.targetChannels.length > 0)))
+      config?.isActive ||
+      (config && (config.targetChannelId || (Array.isArray(config.targetChannels) && config.targetChannels.length > 0)))
     );
     const isTelegramConnected = Boolean(config?.sessionString || config?.telegramUserId);
-    const trackingSubId = user ? `${user.subIdPrefix || "EK"}_tg` : null;
+    const userTrackingSubId =
+      user?.trackingSubId ||
+      (user?.subIdPrefix
+        ? `${user.subIdPrefix}_tg`
+        : config?.userId
+        ? `${config.userId.slice(0, 6)}_tg`
+        : targetUserId
+        ? `${targetUserId.slice(0, 6)}_tg`
+        : "EK_tg");
 
     const sourceChannels =
       config?.sourceChannels && Array.isArray(config.sourceChannels) && config.sourceChannels.length > 0
@@ -280,36 +324,40 @@ export async function GET(req: Request) {
         : [];
 
     const singleConfigItem = {
-      userId: user?.id || config?.userId || "",
+      userId: user?.id || config?.userId || targetUserId || "",
       telegramUserId: config?.telegramUserId || "",
       sessionString: config?.sessionString || null,
       sourceChannels,
       targetChannels,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
-      trackingSubId: trackingSubId || "EK_tg",
+      trackingSubId: userTrackingSubId,
+      subId: userTrackingSubId,
       isActive: config?.isActive !== undefined ? config.isActive : true,
     };
 
     return NextResponse.json({
       success: true,
       connected: isConnected,
-      isTelegramConnected,
-      telegramUserId: config?.telegramUserId || null,
-      telegramUsername: config?.telegramUsername || null,
-      sessionString: config?.sessionString || null,
-      sourceChannels,
-      targetChannels,
+      isActive: config?.isActive !== undefined ? config.isActive : true,
+      subId: userTrackingSubId,
+      trackingSubId: userTrackingSubId,
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
-      isActive: config?.isActive !== undefined ? config.isActive : true,
+      sourceChannels,
+      targetChannels,
+      sessionString: config?.sessionString || null,
+      telegramUserId: config?.telegramUserId || null,
+      telegramUsername: config?.telegramUsername || null,
+      userId: user?.id || config?.userId || targetUserId || null,
+      isTelegramConnected,
       user: user
         ? {
             id: user.id,
             name: user.name,
             email: user.email,
             subIdPrefix: user.subIdPrefix,
-            trackingSubId,
+            trackingSubId: userTrackingSubId,
           }
         : null,
       configs: [singleConfigItem],
@@ -331,9 +379,16 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const json = await req.json();
+    const queryTelegramId = (
+      json.telegramUserId ??
+      json.telegramId ??
+      json.tgId
+    )?.toString().trim() || null;
+    const directUserId = (
+      json.userId ??
+      json.id
+    )?.toString().trim() || undefined;
     const {
-      userId: directUserId,
-      telegramUserId: rawTelegramUserId,
       telegramUsername,
       sessionString,
       sourceChannels,
@@ -343,7 +398,7 @@ export async function POST(req: Request) {
       isActive = true,
     } = json;
 
-    const telegramUserId = rawTelegramUserId !== undefined ? String(rawTelegramUserId).trim() : null;
+    const telegramUserId = queryTelegramId;
 
     // Check worker secret header
     const workerSecretHeader = req.headers.get("x-worker-secret")?.trim();
@@ -381,6 +436,24 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+
+    // Fetch user profile to calculate real subId
+    let userRecord: any = null;
+    if (isDatabaseConfigured()) {
+      try {
+        userRecord = await prisma.user.findUnique({
+          where: { id: targetUserId },
+        });
+      } catch (dbErr) {
+        console.warn("DB user fetch error in POST user-config:", dbErr);
+      }
+    }
+    if (!userRecord) {
+      userRecord = findMockUserById(targetUserId) || (targetUserId === DEMO_USER.id ? DEMO_USER : null);
+    }
+
+    const subIdPrefix = userRecord?.subIdPrefix || userRecord?.referralCode || targetUserId.slice(0, 6);
+    const realTrackingSubId = userRecord?.trackingSubId || `${subIdPrefix}_tg`;
 
     let savedConfig: any = null;
     if (isDatabaseConfigured()) {
@@ -430,13 +503,15 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: "Telegram configuration saved successfully",
+      connected: true,
+      isActive: true,
+      subId: realTrackingSubId,
+      trackingSubId: realTrackingSubId,
       userId: targetUserId,
       telegramUserId: telegramUserId || savedConfig?.telegramUserId || mockSaved.telegramUserId,
       telegramUsername: telegramUsername || savedConfig?.telegramUsername || mockSaved.telegramUsername,
       sessionString: sessionString || savedConfig?.sessionString || mockSaved.sessionString,
-      isActive: true,
       isTelegramConnected: true,
-      connected: true,
       sourceChannels: savedConfig?.sourceChannels ?? mockSaved.sourceChannels ?? DEFAULT_SOURCE_CHANNELS,
       targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
       targetChannelId: targetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,

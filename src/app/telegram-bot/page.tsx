@@ -81,24 +81,26 @@ export default function TelegramBotPage() {
 
   async function loadData() {
     try {
-      const authRes = await fetch("/api/auth/me");
+      const authRes = await fetch("/api/auth/me", { cache: "no-store" });
       if (authRes.ok) {
         const authData = await authRes.json();
         if (authData.authenticated && authData.user) {
           setUser(authData.user);
 
-          // Fetch telegram config for this user
-          const cfgRes = await fetch(`/api/telegram/user-config?userId=${encodeURIComponent(authData.user.id)}`);
+          // Fetch telegram config for this user with cache: 'no-store'
+          const cfgRes = await fetch(`/api/telegram/user-config?userId=${encodeURIComponent(authData.user.id)}`, {
+            cache: "no-store",
+          });
           if (cfgRes.ok) {
             const cfgData = await cfgRes.json();
 
-            // Check user's TelegramChannelConfig by userId. If the user already has a session or active status or telegramUserId, show "Status: Connected" with their live data.
+            // If config.sessionString or config.connected === true or config.isActive === true, immediately display green "Status: Connected"
             const isUserConnected = Boolean(
-              cfgData.connected ||
-              cfgData.isTelegramConnected ||
               cfgData.sessionString ||
-              cfgData.telegramUserId ||
-              (cfgData.isActive && (cfgData.targetChannelId || (Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0)))
+              cfgData.connected === true ||
+              cfgData.isActive === true ||
+              cfgData.isTelegramConnected === true ||
+              cfgData.telegramUserId
             );
             setConnected(isUserConnected);
 

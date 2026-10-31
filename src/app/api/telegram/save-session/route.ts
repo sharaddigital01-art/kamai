@@ -13,6 +13,8 @@ import {
 } from "@/lib/mockData";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const SaveSessionSchema = z.object({
   sessionString: z.string().min(10, "Valid session string is required"),
@@ -110,6 +112,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // Fetch actual user profile/tracking details from User table to get real trackingSubId
+    let userRecord: any = null;
+    if (isDatabaseConfigured()) {
+      try {
+        userRecord = await prisma.user.findUnique({
+          where: { id: targetUserId },
+        });
+      } catch (dbErr) {
+        console.warn("DB user fetch error in save-session:", dbErr);
+      }
+    }
+    if (!userRecord) {
+      userRecord = findMockUserById(targetUserId) || (targetUserId === DEMO_USER.id ? DEMO_USER : null);
+    }
+
+    const subIdPrefix = userRecord?.subIdPrefix || userRecord?.referralCode || targetUserId.slice(0, 6);
+    const realTrackingSubId = userRecord?.trackingSubId || `${subIdPrefix}_tg`;
+
     // Determine targetChannelId and Name from targetChannels if provided
     let cleanTargetChannelId = targetChannelId || null;
     let cleanTargetChannelName = targetChannelName || null;
@@ -125,6 +145,18 @@ export async function POST(req: Request) {
       }
     }
 
+    const finalSourceChannels = Array.isArray(sourceChannels)
+      ? sourceChannels
+      : sourceChannels !== undefined
+      ? [sourceChannels]
+      : [];
+
+    const finalTargetChannels = Array.isArray(targetChannels)
+      ? targetChannels
+      : targetChannels !== undefined
+      ? [targetChannels]
+      : [];
+
     // 3. Save session string and channels to database
     let savedConfig: any = null;
 
@@ -137,8 +169,8 @@ export async function POST(req: Request) {
             telegramUserId: telegramUserId || null,
             telegramUsername: telegramUsername || null,
             sessionString,
-            sourceChannels: sourceChannels !== undefined ? (sourceChannels as any) : undefined,
-            targetChannels: targetChannels !== undefined ? (targetChannels as any) : undefined,
+            sourceChannels: finalSourceChannels as any,
+            targetChannels: finalTargetChannels as any,
             targetChannelId: cleanTargetChannelId,
             targetChannelName: cleanTargetChannelName,
             isActive: true,
@@ -147,8 +179,8 @@ export async function POST(req: Request) {
             sessionString,
             ...(telegramUserId ? { telegramUserId } : {}),
             ...(telegramUsername !== undefined ? { telegramUsername } : {}),
-            ...(sourceChannels !== undefined ? { sourceChannels: sourceChannels as any } : {}),
-            ...(targetChannels !== undefined ? { targetChannels: targetChannels as any } : {}),
+            ...(sourceChannels !== undefined ? { sourceChannels: finalSourceChannels as any } : {}),
+            ...(targetChannels !== undefined ? { targetChannels: finalTargetChannels as any } : {}),
             ...(cleanTargetChannelId !== null ? { targetChannelId: cleanTargetChannelId } : {}),
             ...(cleanTargetChannelName !== null ? { targetChannelName: cleanTargetChannelName } : {}),
             isActive: true,
@@ -166,8 +198,8 @@ export async function POST(req: Request) {
       telegramUserId: telegramUserId || undefined,
       telegramUsername: telegramUsername || undefined,
       sessionString,
-      sourceChannels: sourceChannels !== undefined ? sourceChannels : undefined,
-      targetChannels: targetChannels !== undefined ? targetChannels : undefined,
+      sourceChannels: sourceChannels !== undefined ? finalSourceChannels : undefined,
+      targetChannels: targetChannels !== undefined ? finalTargetChannels : undefined,
       targetChannelId: cleanTargetChannelId,
       targetChannelName: cleanTargetChannelName,
       isActive: true,
@@ -176,6 +208,11 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       message: "Telegram session and channel configuration saved successfully",
+      trackingSubId: realTrackingSubId,
+      subId: realTrackingSubId,
+      isActive: true,
+      isTelegramConnected: true,
+      connected: true,
       userId: targetUserId,
       telegramUserId: telegramUserId || savedConfig?.telegramUserId || mockSaved.telegramUserId,
       telegramUsername: telegramUsername || savedConfig?.telegramUsername || mockSaved.telegramUsername,
@@ -184,9 +221,6 @@ export async function POST(req: Request) {
       targetChannels: savedConfig?.targetChannels ?? mockSaved.targetChannels ?? [],
       targetChannelId: cleanTargetChannelId ?? savedConfig?.targetChannelId ?? mockSaved.targetChannelId,
       targetChannelName: cleanTargetChannelName ?? savedConfig?.targetChannelName ?? mockSaved.targetChannelName,
-      isActive: true,
-      isTelegramConnected: true,
-      connected: true,
     });
   } catch (err: any) {
     console.error("save-session error:", err);
