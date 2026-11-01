@@ -11,6 +11,7 @@ import {
 } from "@/lib/mockData";
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
 import { verifyUnifiedOtp } from "@/lib/otp";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -100,7 +101,9 @@ export async function POST(req: Request) {
               referredById,
             },
           });
-        } else if (isAdmin && user.role !== "ADMIN") {
+        }
+
+        if (user && isAdmin && user.role !== "ADMIN") {
           user = await prisma.user.update({
             where: { id: user.id },
             data: { role: "ADMIN" },
@@ -109,6 +112,37 @@ export async function POST(req: Request) {
       } catch (dbErr: any) {
         console.warn("Database lookup in verify-otp fallback:", dbErr?.message || dbErr);
       }
+    }
+
+    // Auto-confirm verified user in Supabase Auth & PostgreSQL
+    const adminClient = getSupabaseAdmin();
+    if (adminClient) {
+      try {
+        let supaUserId: string | null = user?.id || null;
+        if (!supaUserId) {
+          const { data: listData } = await adminClient.auth.admin.listUsers();
+          const found = listData?.users?.find(
+            (u) => u.email?.toLowerCase() === cleanEmail
+          );
+          if (found) supaUserId = found.id;
+        }
+        if (supaUserId) {
+          await adminClient.auth.admin.updateUserById(supaUserId, {
+            email_confirm: true,
+          });
+        }
+      } catch (adminErr: any) {
+        console.warn("Supabase admin confirm in verify-otp notice:", adminErr?.message || adminErr);
+      }
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, now()), updated_at = now() WHERE lower(email) = lower($1)`,
+          cleanEmail
+        ).catch(() => null);
+      } catch {}
     }
 
     // 2. Mock Fallback Store if DB unavailable

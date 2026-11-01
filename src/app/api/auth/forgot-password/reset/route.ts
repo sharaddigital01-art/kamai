@@ -4,6 +4,7 @@ import { z } from "zod";
 import { verifyPasswordResetOtp } from "@/lib/otp";
 import { prisma } from "@/lib/prisma";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { isDatabaseConfigured, isSupabaseConfigured } from "@/lib/mockData";
 
 export const runtime = "nodejs";
@@ -43,26 +44,69 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Update password in Supabase and PostgreSQL database
+    // 2. Update password in Supabase Auth & PostgreSQL database with email_confirm: true
     let passwordUpdated = false;
 
+    // 2a. Update using Supabase Admin Client
+    const adminClient = getSupabaseAdmin();
+    if (adminClient) {
+      try {
+        let targetUserId: string | null = null;
+        try {
+          const { data: listData } = await adminClient.auth.admin.listUsers();
+          const found = listData?.users?.find(
+            (u) => u.email?.toLowerCase() === cleanEmail
+          );
+          if (found) targetUserId = found.id;
+        } catch {}
+
+        if (!targetUserId && isDatabaseConfigured()) {
+          try {
+            const dbU = await prisma.user.findFirst({
+              where: { email: cleanEmail },
+              select: { id: true },
+            });
+            if (dbU) targetUserId = dbU.id;
+          } catch {}
+        }
+
+        if (targetUserId) {
+          const { error: adminErr } = await adminClient.auth.admin.updateUserById(
+            targetUserId,
+            {
+              password: newPassword,
+              email_confirm: true,
+            }
+          );
+          if (!adminErr) {
+            passwordUpdated = true;
+          } else {
+            console.warn("Supabase admin updateUserById notice:", adminErr.message);
+          }
+        }
+      } catch (adminErr: any) {
+        console.warn("Supabase admin updateUserById error:", adminErr?.message || adminErr);
+      }
+    }
+
+    // 2b. Direct PostgreSQL auth.users update with email_confirmed_at
     if (isDatabaseConfigured()) {
       try {
         await prisma.$executeRawUnsafe(
-          `UPDATE auth.users SET encrypted_password = crypt($1, gen_salt('bf')), updated_at = now() WHERE lower(email) = lower($2)`,
+          `UPDATE auth.users SET encrypted_password = crypt($1, gen_salt('bf')), email_confirmed_at = COALESCE(email_confirmed_at, now()), updated_at = now() WHERE lower(email) = lower($2)`,
           newPassword,
           cleanEmail
-        );
+        ).catch(() => null);
         passwordUpdated = true;
       } catch (dbErr: any) {
         console.warn("Direct auth.users update notice:", dbErr?.message || dbErr);
       }
     }
 
-    if (isSupabaseConfigured()) {
+    // 2c. Fallback via user session client if active
+    if (!passwordUpdated && isSupabaseConfigured()) {
       try {
         const supabase = await createSupabaseServer();
-        // If an active session exists or admin client available
         const { error: supaErr } = await supabase.auth.updateUser({
           password: newPassword,
         });

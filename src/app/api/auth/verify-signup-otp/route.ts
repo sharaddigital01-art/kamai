@@ -12,6 +12,7 @@ import {
 } from "@/lib/mockData";
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
 import { verifyUnifiedOtp } from "@/lib/otp";
+import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
@@ -62,7 +63,74 @@ export async function POST(req: Request) {
     const pending = verification.data;
     const isAdmin = isAdminEmail(cleanEmail);
     const role = isAdmin ? "ADMIN" : "USER";
-    const authUserId = crypto.randomUUID();
+    let authUserId: string = crypto.randomUUID();
+
+    // 1.5 Auto-Confirm on Signup / OTP Verification via Supabase Admin
+    const adminClient = getSupabaseAdmin();
+    if (adminClient) {
+      try {
+        const createPayload: any = {
+          email: cleanEmail,
+          email_confirm: true,
+          user_metadata: {
+            name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
+          },
+        };
+        if (pending.password) {
+          createPayload.password = pending.password;
+        }
+
+        const { data: supaCreate, error: supaErr } =
+          await adminClient.auth.admin.createUser(createPayload);
+
+        if (supaCreate?.user?.id) {
+          authUserId = supaCreate.user.id;
+        } else if (supaErr) {
+          // If the user already exists in Supabase Auth, find and auto-confirm them
+          console.warn("Supabase createUser notice in verify-signup-otp:", supaErr.message);
+
+          let existingSupaId: string | null = null;
+          try {
+            const { data: listData } = await adminClient.auth.admin.listUsers();
+            const found = listData?.users?.find(
+              (u) => u.email?.toLowerCase() === cleanEmail
+            );
+            if (found) existingSupaId = found.id;
+          } catch {}
+
+          if (!existingSupaId && isDatabaseConfigured()) {
+            try {
+              const dbU = await prisma.user.findFirst({
+                where: { email: cleanEmail },
+                select: { id: true },
+              });
+              if (dbU) existingSupaId = dbU.id;
+            } catch {}
+          }
+
+          if (existingSupaId) {
+            authUserId = existingSupaId;
+            const updatePayload: any = { email_confirm: true };
+            if (pending.password) {
+              updatePayload.password = pending.password;
+            }
+            await adminClient.auth.admin.updateUserById(existingSupaId, updatePayload);
+          }
+        }
+      } catch (adminErr: any) {
+        console.warn("Supabase admin auto-confirm error in verify-signup-otp:", adminErr?.message || adminErr);
+      }
+    }
+
+    // Direct database auto-confirm for PostgreSQL auth.users
+    if (isDatabaseConfigured()) {
+      try {
+        await prisma.$executeRawUnsafe(
+          `UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, now()), updated_at = now() WHERE lower(email) = lower($1)`,
+          cleanEmail
+        ).catch(() => null);
+      } catch {}
+    }
 
     // 2. Create or link record in database (no duplicate Supabase email sent)
     let createdUser: any = null;
@@ -73,22 +141,31 @@ export async function POST(req: Request) {
         if (pending.referralCode) {
           const referrer = await prisma.user.findUnique({
             where: { referralCode: pending.referralCode },
+            select: { id: true },
           });
           if (referrer) referredById = referrer.id;
         }
 
-        createdUser = await prisma.user.create({
-          data: {
-            id: authUserId,
-            email: cleanEmail,
-            phone: pending.phone || null,
-            name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
-            role,
-            referralCode: randomCode(8),
-            subIdPrefix: randomCode(6),
-            referredById,
-          },
+        const existing = await prisma.user.findFirst({
+          where: { OR: [{ id: authUserId }, { email: cleanEmail }] },
         });
+
+        if (existing) {
+          createdUser = existing;
+        } else {
+          createdUser = await prisma.user.create({
+            data: {
+              id: authUserId,
+              email: cleanEmail,
+              phone: pending.phone || null,
+              name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
+              role,
+              referralCode: randomCode(8),
+              subIdPrefix: randomCode(6),
+              referredById,
+            },
+          });
+        }
       } catch (dbErr: any) {
         console.warn("Database user create in verify-signup-otp fallback:", dbErr?.message || dbErr);
       }

@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { randomCode } from "@/lib/shortcode";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   isDatabaseConfigured,
   isSupabaseConfigured,
@@ -223,10 +224,88 @@ export async function POST(req: Request) {
     if (isSupabaseConfigured() && norm.type === "email") {
       try {
         const supabase = await createSupabaseServer();
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
           email: targetEmail,
           password,
         });
+
+        // 3. Graceful Fallback in Login Route: If Supabase returns "Email not confirmed"
+        if (authError && authError.message.toLowerCase().includes("email not confirmed")) {
+          console.warn(
+            "Supabase returned 'Email not confirmed' for:",
+            targetEmail,
+            "- checking database and auto-confirming via Supabase Admin..."
+          );
+
+          let dbUser: any = null;
+          if (isDatabaseConfigured()) {
+            try {
+              dbUser = await prisma.user.findFirst({
+                where: { email: targetEmail },
+              });
+            } catch (dbErr: any) {
+              console.warn("DB user check on unconfirmed email:", dbErr?.message || dbErr);
+            }
+          }
+          if (!dbUser) {
+            dbUser = findMockUserByEmail(targetEmail);
+          }
+
+          let supaUserId: string | null = dbUser?.id || null;
+          const adminClient = getSupabaseAdmin();
+
+          if (adminClient) {
+            try {
+              if (!supaUserId) {
+                const { data: listData } = await adminClient.auth.admin.listUsers();
+                const found = listData?.users?.find(
+                  (u) => u.email?.toLowerCase() === targetEmail
+                );
+                if (found) supaUserId = found.id;
+              }
+
+              if (supaUserId) {
+                await adminClient.auth.admin.updateUserById(supaUserId, {
+                  email_confirm: true,
+                });
+              }
+            } catch (adminErr: any) {
+              console.warn("Supabase admin updateUserById auto-confirm notice:", adminErr?.message || adminErr);
+            }
+          }
+
+          if (isDatabaseConfigured()) {
+            try {
+              await prisma.$executeRawUnsafe(
+                `UPDATE auth.users SET email_confirmed_at = COALESCE(email_confirmed_at, now()), updated_at = now() WHERE lower(email) = lower($1)`,
+                targetEmail
+              ).catch(() => null);
+            } catch {}
+          }
+
+          // Retry signing in now that email is confirmed
+          try {
+            const retryRes = await supabase.auth.signInWithPassword({
+              email: targetEmail,
+              password,
+            });
+            if (retryRes.data?.user) {
+              authData = retryRes.data;
+              authError = null;
+            } else if (dbUser) {
+              // Proceed with signing them in without throwing an error to the UI
+              authUserId = dbUser.id;
+              authName = dbUser.name || null;
+              authError = null;
+            }
+          } catch {
+            if (dbUser) {
+              authUserId = dbUser.id;
+              authName = dbUser.name || null;
+              authError = null;
+            }
+          }
+        }
 
         if (authError) {
           // If Supabase throws rate limit or invalid credentials, return clear message

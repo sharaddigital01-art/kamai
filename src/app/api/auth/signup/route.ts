@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { randomCode } from "@/lib/shortcode";
 import { createSupabaseServer } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   isDatabaseConfigured,
   isSupabaseConfigured,
@@ -36,26 +37,58 @@ export async function POST(req: Request) {
     const isAdmin = isAdminEmail(email);
     const role = isAdmin ? "ADMIN" : "USER";
 
-    let authUserId = crypto.randomUUID();
+    let authUserId: string = crypto.randomUUID();
 
-    // 1. If Supabase Auth is configured, register user in Supabase Auth
+    // 1. If Supabase Auth is configured, register user in Supabase Auth with auto-confirm
     if (isSupabaseConfigured()) {
       try {
-        const supabase = await createSupabaseServer();
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { name },
-          },
-        });
+        const adminClient = getSupabaseAdmin();
+        if (adminClient) {
+          const { data: supaCreate, error: supaErr } =
+            await adminClient.auth.admin.createUser({
+              email,
+              password,
+              email_confirm: true,
+              user_metadata: { name },
+            });
 
-        if (authError) {
-          return NextResponse.json({ error: authError.message }, { status: 400 });
-        }
+          if (supaCreate?.user?.id) {
+            authUserId = supaCreate.user.id;
+          } else if (supaErr) {
+            let existingUserId: string | null = null;
+            try {
+              const { data: listData } = await adminClient.auth.admin.listUsers();
+              const found = listData?.users?.find(
+                (u) => u.email?.toLowerCase() === email
+              );
+              if (found) existingUserId = found.id;
+            } catch {}
 
-        if (authData.user?.id) {
-          authUserId = authData.user.id;
+            if (existingUserId) {
+              authUserId = existingUserId;
+              await adminClient.auth.admin.updateUserById(existingUserId, {
+                password,
+                email_confirm: true,
+              });
+            }
+          }
+        } else {
+          const supabase = await createSupabaseServer();
+          const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: { name },
+            },
+          });
+
+          if (authError) {
+            return NextResponse.json({ error: authError.message }, { status: 400 });
+          }
+
+          if (authData.user?.id) {
+            authUserId = authData.user.id;
+          }
         }
       } catch (err: any) {
         console.warn("Supabase Auth signup notice:", err?.message || err);

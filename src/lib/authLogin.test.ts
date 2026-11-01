@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { POST as sendOtpHandler } from "../app/api/auth/send-otp/route";
 import { POST as loginHandler } from "../app/api/auth/login/route";
 import { POST as verifyOtpHandler } from "../app/api/auth/verify-otp/route";
+import { POST as sendSignupOtpHandler } from "../app/api/auth/send-signup-otp/route";
+import { POST as verifySignupOtpHandler } from "../app/api/auth/verify-signup-otp/route";
 
 describe("Web Login Authentication & Email OTP Flow", () => {
   it("sends Email OTP for valid email and returns demoOtp in non-production", async () => {
@@ -145,5 +147,54 @@ describe("Web Login Authentication & Email OTP Flow", () => {
 
     expect(res.status).toBe(400);
     expect(data.error).toContain("Invalid");
+  });
+
+  it("registers via Brevo signup OTP and creates confirmed account", async () => {
+    const signupEmail = "brevo_signup_autoconfirm@kamai.local";
+    const sendRes = await sendSignupOtpHandler(
+      new Request("http://localhost:3000/api/auth/send-signup-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Brevo User",
+          email: signupEmail,
+          password: "mypassword123",
+        }),
+      })
+    );
+    const sendData = await sendRes.json();
+    expect(sendRes.status).toBe(200);
+    expect(sendData.demoOtp).toBeDefined();
+
+    const verifyRes = await verifySignupOtpHandler(
+      new Request("http://localhost:3000/api/auth/verify-signup-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: signupEmail,
+          otp: sendData.demoOtp,
+        }),
+      })
+    );
+    const verifyData = await verifyRes.json();
+    expect(verifyRes.status).toBe(201);
+    expect(verifyData.success).toBe(true);
+    expect(verifyData.user.email).toBe(signupEmail);
+
+    // Now test logging in with that password
+    const loginRes = await loginHandler(
+      new Request("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: signupEmail,
+          password: "mypassword123",
+        }),
+      })
+    );
+    const loginData = await loginRes.json();
+    expect(loginRes.status).toBe(200);
+    expect(loginData.success).toBe(true);
+    expect(loginData.user.email).toBe(signupEmail);
   });
 });
