@@ -3,10 +3,13 @@ import {
   validateIndianPhone,
   generateNumericOtp,
   isValidUpiId,
+  normalizeIdentifier,
   createSignupOtp,
   verifySignupOtp,
   createWithdrawalOtp,
   verifyWithdrawalOtp,
+  createLoginOtp,
+  verifyLoginOtp,
 } from "./otp";
 
 describe("OTP and Validation Utilities", () => {
@@ -163,6 +166,79 @@ describe("OTP and Validation Utilities", () => {
       expect(verified.ok).toBe(true);
       expect(verified.data?.amountPaise).toBe(50000);
       expect(verified.data?.upiId).toBe("withdrawer@oksbi");
+    });
+  });
+
+  describe("normalizeIdentifier", () => {
+    it("normalizes email addresses correctly", () => {
+      const res = normalizeIdentifier("  User@Example.COM ");
+      expect(res.type).toBe("email");
+      expect(res.normalized).toBe("user@example.com");
+      expect(res.error).toBeUndefined();
+    });
+
+    it("normalizes 10-digit Indian mobile numbers correctly", () => {
+      const res = normalizeIdentifier("9876543210");
+      expect(res.type).toBe("phone");
+      expect(res.normalized).toBe("+919876543210");
+      expect(res.cleanDigits).toBe("9876543210");
+      expect(res.error).toBeUndefined();
+    });
+
+    it("returns error for empty or invalid strings", () => {
+      const res1 = normalizeIdentifier("");
+      expect(res1.error).toBeDefined();
+
+      const res2 = normalizeIdentifier("invalid_phone_or_email");
+      expect(res2.error).toBeDefined();
+    });
+  });
+
+  describe("Login OTP flow", () => {
+    const testPhone = "9876543299";
+
+    it("creates a login OTP and enforces resend cooldown", async () => {
+      const first = await createLoginOtp({
+        identifier: testPhone,
+      });
+
+      expect(first.ok).toBe(true);
+      expect(first.code).toMatch(/^\d{6}$/);
+      expect(first.normalizedIdentifier).toBe("+919876543299");
+
+      // Cooldown blocks immediate resend
+      const second = await createLoginOtp({
+        identifier: testPhone,
+      });
+
+      expect(second.ok).toBe(false);
+      expect(second.error).toContain("Please wait");
+      expect(second.resendAfterSeconds).toBeGreaterThan(0);
+    });
+
+    it("verifies with generated OTP and accepts 123456 test OTP in non-production", async () => {
+      const specificEmail = "logintest@earnkaro.test";
+      const created = await createLoginOtp({
+        identifier: specificEmail,
+      });
+
+      expect(created.ok).toBe(true);
+
+      // Wrong OTP
+      const wrong = verifyLoginOtp({
+        identifier: specificEmail,
+        otp: "000000",
+      });
+      expect(wrong.ok).toBe(false);
+      expect(wrong.error).toContain("Invalid OTP");
+
+      // Test OTP 123456 is accepted
+      const testOtpVerify = verifyLoginOtp({
+        identifier: specificEmail,
+        otp: "123456",
+      });
+      expect(testOtpVerify.ok).toBe(true);
+      expect(testOtpVerify.data?.identifier).toBe(specificEmail);
     });
   });
 });

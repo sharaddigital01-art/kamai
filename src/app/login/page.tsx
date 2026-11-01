@@ -1,18 +1,23 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Lock,
   Mail,
+  Smartphone,
   Eye,
   EyeOff,
   ArrowRight,
+  ArrowLeft,
   LoaderCircle,
   AlertCircle,
   ShieldCheck,
   CheckCircle2,
+  KeyRound,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 
 function LoginForm() {
@@ -20,18 +25,69 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") || "/profile";
 
-  const [email, setEmail] = useState("");
+  // Tab: 'password' | 'otp'
+  const [authMode, setAuthMode] = useState<"password" | "otp">("password");
+
+  // --- Password Mode States ---
+  const [emailOrPhone, setEmailOrPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // --- OTP Mode States ---
+  const [otpStep, setOtpStep] = useState<1 | 2>(1); // 1 = identifier, 2 = enter otp
+  const [otpTarget, setOtpTarget] = useState("");
+  const [otpDigits, setOtpDigits] = useState<string[]>(["", "", "", "", "", ""]);
+  const [countdown, setCountdown] = useState<number>(0);
+  const [demoOtp, setDemoOtp] = useState<string | null>(null);
+  const [isRateLimited, setIsRateLimited] = useState<boolean>(false);
+
+  // --- Common UI States ---
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+
+  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Countdown timer for OTP resend cooldown
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    if (countdown > 0) {
+      timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            setIsRateLimited(false);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [countdown]);
+
+  // Focus first OTP input when entering OTP step 2
+  useEffect(() => {
+    if (authMode === "otp" && otpStep === 2) {
+      setTimeout(() => {
+        otpInputRefs.current[0]?.focus();
+      }, 100);
+    }
+  }, [authMode, otpStep]);
+
+  // ---------------------------------------------------------------------------
+  // Action: Direct Password Login
+  // ---------------------------------------------------------------------------
+  async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setSuccessNotice(null);
 
-    if (!email.trim() || !password) {
-      setError("Please enter both email and password.");
+    const trimmedInput = emailOrPhone.trim();
+    if (!trimmedInput || !password) {
+      setError("Please enter both your email/phone and password.");
       return;
     }
 
@@ -41,29 +97,234 @@ function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({
+          identifier: trimmedInput,
+          emailOrPhone: trimmedInput,
+          email: trimmedInput.includes("@") ? trimmedInput : undefined,
+          password,
+        }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setError(data.error || "Invalid credentials. Please try again.");
-        setLoading(false);
+        if (res.status === 429) {
+          setIsRateLimited(true);
+          setError(
+            data.error ||
+              "Too many failed login attempts. Please wait a moment or sign in using OTP."
+          );
+        } else {
+          setError(data.error || "Invalid credentials. Please verify your details.");
+        }
         return;
       }
 
-      // Success: redirect to target or profile
+      // Success: redirect
       router.push(nextPath.startsWith("/") ? nextPath : "/profile");
       router.refresh();
     } catch {
-      setError("Network error. Please try again.");
+      setError("Network error. Please check your connection and try again.");
+    } finally {
       setLoading(false);
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Action: Send Login OTP (Step 1)
+  // ---------------------------------------------------------------------------
+  async function handleSendOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccessNotice(null);
+
+    const trimmedTarget = otpTarget.trim();
+    if (!trimmedTarget) {
+      setError("Please enter your mobile number or email address.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          identifier: trimmedTarget,
+          emailOrPhone: trimmedTarget,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 429) {
+          setIsRateLimited(true);
+          const cooldown = data.resendAfterSeconds || 60;
+          setCountdown(cooldown);
+          setError(
+            data.error ||
+              `Rate limit reached. Please wait ${cooldown}s or switch to Password Login.`
+          );
+        } else {
+          setError(
+            data.error ||
+              "Could not send OTP. You can log in directly using your Password instead."
+          );
+        }
+        return;
+      }
+
+      // Success: proceed to Step 2
+      if (data.demoOtp) {
+        setDemoOtp(data.demoOtp);
+      }
+      const cooldownSec = data.resendAfterSeconds || 60;
+      setCountdown(cooldownSec);
+      setIsRateLimited(false);
+      setSuccessNotice(data.message || "Verification code sent successfully.");
+      setOtpStep(2);
+    } catch {
+      setError("Network connection issue. Please try again or use Password Login.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Action: Resend OTP
+  // ---------------------------------------------------------------------------
+  async function handleResendOtp() {
+    if (countdown > 0 || resending) return;
+    setError(null);
+    setSuccessNotice(null);
+    setResending(true);
+
+    try {
+      const res = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: otpTarget.trim() }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (res.status === 429) {
+          setIsRateLimited(true);
+          setCountdown(data.resendAfterSeconds || 60);
+        }
+        setError(data.error || "Unable to resend OTP at this time.");
+        return;
+      }
+
+      if (data.demoOtp) {
+        setDemoOtp(data.demoOtp);
+      }
+      setCountdown(data.resendAfterSeconds || 60);
+      setIsRateLimited(false);
+      setSuccessNotice("New verification code sent!");
+      setOtpDigits(["", "", "", "", "", ""]);
+      otpInputRefs.current[0]?.focus();
+    } catch {
+      setError("Network error while resending OTP.");
+    } finally {
+      setResending(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Action: Verify OTP & Complete Login (Step 2)
+  // ---------------------------------------------------------------------------
+  async function handleVerifyOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const enteredOtp = otpDigits.join("");
+    if (enteredOtp.length !== 6) {
+      setError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          identifier: otpTarget.trim(),
+          otp: enteredOtp,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(data.error || "Invalid verification code. Please check and try again.");
+        return;
+      }
+
+      // Success: redirect
+      router.push(nextPath.startsWith("/") ? nextPath : "/profile");
+      router.refresh();
+    } catch {
+      setError("Network error while verifying OTP. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // OTP Digits Input Handler
+  // ---------------------------------------------------------------------------
+  function handleOtpChange(index: number, val: string) {
+    const clean = val.replace(/\D/g, "");
+    if (!clean) {
+      const updated = [...otpDigits];
+      updated[index] = "";
+      setOtpDigits(updated);
+      return;
+    }
+
+    // Handle full 6-digit paste
+    if (clean.length >= 6) {
+      const six = clean.slice(0, 6).split("");
+      setOtpDigits(six);
+      otpInputRefs.current[5]?.focus();
+      return;
+    }
+
+    const digit = clean.slice(-1);
+    const updated = [...otpDigits];
+    updated[index] = digit;
+    setOtpDigits(updated);
+
+    // Auto-advance to next input
+    if (index < 5) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  }
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
+      otpInputRefs.current[index - 1]?.focus();
+    }
+  }
+
+  function fillDemoOtp(code: string) {
+    const chars = code.slice(0, 6).split("");
+    while (chars.length < 6) chars.push("");
+    setOtpDigits(chars);
+    otpInputRefs.current[5]?.focus();
+  }
+
   function fillAdminDemo() {
-    setEmail("admin@earnkaro.com");
+    setAuthMode("password");
+    setEmailOrPhone("admin@earnkaro.com");
     setPassword("admin123456");
+    setError(null);
   }
 
   return (
@@ -84,90 +345,322 @@ function LoginForm() {
           </p>
         </div>
 
-        {/* Login Form Body */}
+        {/* Tab Switcher: Password Login vs OTP Login */}
+        <div className="border-b border-gray-100 bg-[#F9FBFA] p-2">
+          <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-200/60 p-1 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("password");
+                setError(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 transition ${
+                authMode === "password"
+                  ? "bg-white text-[#169443] shadow-sm"
+                  : "text-ink-soft hover:text-ink"
+              }`}
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Password Login</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("otp");
+                setError(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 transition ${
+                authMode === "otp"
+                  ? "bg-white text-[#169443] shadow-sm"
+                  : "text-ink-soft hover:text-ink"
+              }`}
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+              <span>OTP Login</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Login Body */}
         <div className="p-6">
+          {/* Error Banner */}
           {error && (
             <div
               role="alert"
-              className="mb-5 flex items-start gap-2.5 rounded-2xl bg-red-50 p-3.5 text-xs text-red-700 ring-1 ring-red-200"
+              className="mb-5 flex flex-col gap-2 rounded-2xl bg-red-50 p-3.5 text-xs text-red-700 ring-1 ring-red-200"
             >
-              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600" />
-              <span>{error}</span>
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600" />
+                <span className="flex-1 leading-relaxed">{error}</span>
+              </div>
+
+              {/* Helpful suggestions on rate limit or provider delay */}
+              {isRateLimited && (
+                <div className="mt-1 flex items-center justify-between border-t border-red-200/60 pt-2 text-[11px]">
+                  <span className="font-medium text-red-800">
+                    {countdown > 0 ? `Cooldown: ${countdown}s remaining` : "Cooldown active"}
+                  </span>
+                  {authMode === "otp" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode("password");
+                        setError(null);
+                      }}
+                      className="font-bold text-[#169443] hover:underline"
+                    >
+                      Use Password Login →
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode("otp");
+                        setError(null);
+                      }}
+                      className="font-bold text-[#169443] hover:underline"
+                    >
+                      Try OTP Login →
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-                <input
-                  type="email"
-                  required
-                  autoComplete="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
-                />
-              </div>
+          {/* Success Notice */}
+          {successNotice && !error && (
+            <div className="mb-4 flex items-center gap-2 rounded-2xl bg-emerald-50 p-3 text-xs text-emerald-800 ring-1 ring-emerald-200">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-[#169443]" />
+              <span>{successNotice}</span>
             </div>
+          )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-ink uppercase tracking-wide">
-                  Password
+          {/* ================================================================= */}
+          {/* TAB 1: Password Direct Sign-In Form                               */}
+          {/* ================================================================= */}
+          {authMode === "password" && (
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
+                  Email or Mobile Number
                 </label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+                  <input
+                    type="text"
+                    required
+                    autoComplete="username"
+                    placeholder="name@example.com or 9876543210"
+                    value={emailOrPhone}
+                    onChange={(e) => setEmailOrPhone(e.target.value)}
+                    className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  autoComplete="current-password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-11 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
-                />
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-ink uppercase tracking-wide">
+                    Password
+                  </label>
+                </div>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-11 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((p) => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-ink-soft hover:text-ink"
+                    aria-label="Toggle password visibility"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-[#169443] py-3.5 font-bold text-white shadow-md hover:bg-[#13803a] active:scale-[0.99] transition disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Logging in...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Log In with Password</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* TAB 2: OTP Login (Step 1: Enter Identifier)                        */}
+          {/* ================================================================= */}
+          {authMode === "otp" && otpStep === 1 && (
+            <form onSubmit={handleSendOtp} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
+                  Mobile Number or Email
+                </label>
+                <div className="relative">
+                  <Smartphone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 9876543210 or name@example.com"
+                    value={otpTarget}
+                    onChange={(e) => setOtpTarget(e.target.value)}
+                    className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-ink-soft">
+                  We'll send a 6-digit one-time password to verify your identity.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || countdown > 0}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-[#169443] py-3.5 font-bold text-white shadow-md hover:bg-[#13803a] active:scale-[0.99] transition disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Sending OTP...</span>
+                  </>
+                ) : countdown > 0 ? (
+                  <span>Wait {countdown}s to Resend</span>
+                ) : (
+                  <>
+                    <span>Get Verification Code</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* ================================================================= */}
+          {/* TAB 2: OTP Login (Step 2: Enter 6-digit Code)                     */}
+          {/* ================================================================= */}
+          {authMode === "otp" && otpStep === 2 && (
+            <form onSubmit={handleVerifyOtp} className="space-y-4">
+              <div className="text-center">
+                <p className="text-xs text-ink-soft">
+                  Enter the 6-digit verification code sent to
+                </p>
+                <p className="font-bold text-sm text-ink mt-0.5">{otpTarget}</p>
                 <button
                   type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-1 text-ink-soft hover:text-ink"
-                  aria-label="Toggle password visibility"
+                  onClick={() => {
+                    setOtpStep(1);
+                    setError(null);
+                    setSuccessNotice(null);
+                  }}
+                  className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#169443] hover:underline"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  <ArrowLeft className="h-3 w-3" />
+                  <span>Change number/email</span>
                 </button>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-[#169443] py-3.5 font-bold text-white shadow-md hover:bg-[#13803a] active:scale-[0.99] transition disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  <span>Logging in...</span>
-                </>
-              ) : (
-                <>
-                  <span>Log In</span>
-                  <ArrowRight className="h-4 w-4" />
-                </>
+              {/* 6-Digit OTP Boxes */}
+              <div className="flex justify-center gap-2 pt-2">
+                {otpDigits.map((digit, idx) => (
+                  <input
+                    key={idx}
+                    ref={(el) => {
+                      otpInputRefs.current[idx] = el;
+                    }}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(idx, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                    className="h-12 w-11 rounded-xl border border-gray-200 bg-[#F4F6F5] text-center text-lg font-black text-ink shadow-sm outline-none transition focus:border-[#169443] focus:bg-white focus:ring-2 focus:ring-[#169443]/30"
+                  />
+                ))}
+              </div>
+
+              {/* Test / Dev OTP Helper */}
+              {demoOtp && (
+                <div className="mt-2 flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800 ring-1 ring-emerald-200">
+                  <span className="flex items-center gap-1 font-semibold">
+                    <Sparkles className="h-3.5 w-3.5 text-[#169443]" />
+                    Test Code: <code className="bg-emerald-100 px-1 py-0.5 rounded font-mono font-bold">{demoOtp}</code>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fillDemoOtp(demoOtp)}
+                    className="font-bold text-[#169443] hover:underline"
+                  >
+                    Auto-fill
+                  </button>
+                </div>
               )}
-            </button>
-          </form>
+
+              {/* Resend Cooldown Countdown */}
+              <div className="flex items-center justify-between text-xs pt-1">
+                <span className="text-ink-soft">Didn't receive code?</span>
+                {countdown > 0 ? (
+                  <span className="font-semibold text-ink-soft">
+                    Resend in {countdown}s
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={resending}
+                    onClick={handleResendOtp}
+                    className="flex items-center gap-1 font-bold text-[#169443] hover:underline disabled:opacity-50"
+                  >
+                    <RotateCcw className={`h-3 w-3 ${resending ? "animate-spin" : ""}`} />
+                    <span>Resend Code</span>
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-[#169443] py-3.5 font-bold text-white shadow-md hover:bg-[#13803a] active:scale-[0.99] transition disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Verifying & Logging In...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Verify & Log In</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
 
           {/* Quick Demo Credentials Help */}
-          <div className="mt-5 rounded-2xl bg-emerald-50/80 p-3 text-xs text-emerald-900 ring-1 ring-emerald-200/60">
+          <div className="mt-6 rounded-2xl bg-emerald-50/80 p-3.5 text-xs text-emerald-900 ring-1 ring-emerald-200/60">
             <div className="flex items-center justify-between">
               <span className="font-bold flex items-center gap-1.5 text-emerald-800">
                 <ShieldCheck className="h-4 w-4 text-[#169443]" />
-                Admin Credentials
+                Demo Credentials & Quick Sign-In
               </span>
               <button
                 type="button"
@@ -178,7 +671,10 @@ function LoginForm() {
               </button>
             </div>
             <p className="mt-1 text-[11px] text-emerald-700">
-              Email: <code className="bg-emerald-100 px-1 py-0.5 rounded">admin@earnkaro.com</code> (Grants access to /admin)
+              Admin Login: <code className="bg-emerald-100 px-1 py-0.5 rounded">admin@earnkaro.com</code> | Pass: <code className="bg-emerald-100 px-1 py-0.5 rounded">admin123456</code>
+            </p>
+            <p className="mt-0.5 text-[11px] text-emerald-700">
+              Reliable Test OTP in dev: <code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">123456</code> (always accepted)
             </p>
           </div>
 
