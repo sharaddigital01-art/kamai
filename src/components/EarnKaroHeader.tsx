@@ -173,15 +173,15 @@ export function EarnKaroHeader({
           </button>
 
           {/* Center: Brand Logo with Leaf Mark */}
-          <Link href="/" prefetch={true} className="flex items-center gap-1.5 focus:outline-none">
+          <Link href="/" prefetch={true} className="flex items-center gap-1.5 focus:outline-none" aria-label="Kamai Karo Home">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#1ba34e] text-white shadow-sm ring-1 ring-white/20">
               <svg className="h-4 w-4 fill-white" viewBox="0 0 24 24">
                 <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 2-10 4-4.22 4.22-3.1 9.5-3 10 .3.4.8.7 1.3.7 1.1 0 1.9-.9 1.9-2 0-3 3-5 5-7z" />
               </svg>
             </span>
             <div className="flex items-baseline font-black tracking-tight font-display text-xl leading-none">
-              <span className="text-white">EARN</span>
-              <span className="text-[#22c55e]">KARO</span>
+              <span className="text-white">KAMAI</span>
+              <span className="text-[#22c55e] ml-1">KARO</span>
             </div>
           </Link>
 

@@ -58,6 +58,7 @@ interface AuthUserData {
   name: string | null;
   role: "USER" | "ADMIN";
   referralCode: string;
+  subIdPrefix?: string;
 }
 
 function ProfileSkeleton() {
@@ -214,6 +215,11 @@ export default function ProfilePage() {
     }
   }
 
+  const dynamicReferralCode =
+    user?.referralCode && user.referralCode !== "KAMAIDEMO"
+      ? user.referralCode
+      : user?.subIdPrefix || (user?.id ? user.id.replace(/-/g, "").slice(0, 8).toUpperCase() : "");
+
   function copyUserId() {
     if (!user) return;
     navigator.clipboard?.writeText(user.id);
@@ -222,8 +228,8 @@ export default function ProfilePage() {
   }
 
   function copyRefCode() {
-    if (!user) return;
-    navigator.clipboard?.writeText(user.referralCode);
+    if (!dynamicReferralCode) return;
+    navigator.clipboard?.writeText(dynamicReferralCode);
     setCopiedRef(true);
     setTimeout(() => setCopiedRef(false), 2000);
   }
@@ -381,7 +387,7 @@ export default function ProfilePage() {
         <div className="mt-4 flex items-center justify-between rounded-xl bg-white/10 px-3 py-2 text-xs">
           <div>
             <span className="text-[10px] uppercase font-bold text-emerald-200">My Referral Code</span>
-            <p className="font-mono font-bold tracking-wider text-white">{user.referralCode}</p>
+            <p className="font-mono font-bold tracking-wider text-white">{dynamicReferralCode}</p>
           </div>
           <button
             type="button"

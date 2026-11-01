@@ -15,6 +15,11 @@ export async function GET() {
       });
     }
 
+    const userReferralCode =
+      user.referralCode && user.referralCode !== "KAMAIDEMO"
+        ? user.referralCode
+        : (user as any).subIdPrefix || user.id.replace(/-/g, "").slice(0, 8).toUpperCase();
+
     return NextResponse.json({
       authenticated: true,
       user: {
@@ -23,7 +28,8 @@ export async function GET() {
         phone: (user as any).phone || null,
         name: user.name,
         role: user.role,
-        referralCode: user.referralCode,
+        referralCode: userReferralCode,
+        subIdPrefix: (user as any).subIdPrefix || userReferralCode.slice(0, 6),
       },
       isAdmin: isAdminUser(user),
     });

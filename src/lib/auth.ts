@@ -64,7 +64,10 @@ export const getAuthUser = cache(async () => {
         return {
           id: parsed.id,
           email: parsed.email || null,
+          phone: parsed.phone || null,
           user_metadata: { name: parsed.name || parsed.email?.split("@")[0] || "Kamai Karo Partner" },
+          referralCode: parsed.referralCode,
+          subIdPrefix: parsed.subIdPrefix,
           aud: "authenticated",
           created_at: parsed.createdAt || new Date().toISOString(),
         } as any;
@@ -131,7 +134,15 @@ export async function getOrCreateProfile(auth: {
   }
 
   try {
-    const existing = await prisma.user.findUnique({ where: { id: auth.id } });
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { id: auth.id },
+          ...(auth.email ? [{ email: auth.email }] : []),
+        ],
+      },
+    });
+
     if (existing) {
       // If user is listed in ADMIN_EMAILS but role is USER, update role
       if (isAdmin && existing.role !== "ADMIN") {
@@ -155,6 +166,9 @@ export async function getOrCreateProfile(auth: {
       (auth.email ? auth.email.split("@")[0] : null) ||
       "Kamai Karo Partner";
 
+    const generatedRefCode = (auth as any).referralCode || randomCode(8);
+    const generatedSubId = (auth as any).subIdPrefix || randomCode(6);
+
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
         return await prisma.user.create({
@@ -164,13 +178,20 @@ export async function getOrCreateProfile(auth: {
             phone: auth.phone || null,
             name: userName,
             role: targetRole,
-            referralCode: randomCode(8),
-            subIdPrefix: randomCode(6),
+            referralCode: attempt === 0 ? generatedRefCode : randomCode(8),
+            subIdPrefix: attempt === 0 ? generatedSubId : randomCode(6),
             referredById: referrer && referrer.id !== auth.id ? referrer.id : null,
           },
         });
       } catch (e) {
-        const raced = await prisma.user.findUnique({ where: { id: auth.id } });
+        const raced = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { id: auth.id },
+              ...(auth.email ? [{ email: auth.email }] : []),
+            ],
+          },
+        });
         if (raced) return raced;
         if ((e as { code?: string }).code !== "P2002") throw e;
       }
@@ -179,12 +200,29 @@ export async function getOrCreateProfile(auth: {
     console.warn("Database error in getOrCreateProfile, fallback profile:", err);
   }
 
+  const emailPrefix = auth.email ? (auth.email.split("@")[0] || "").toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+
+  const fallbackRefCode =
+    (auth as any).referralCode && (auth as any).referralCode !== "KAMAIDEMO"
+      ? (auth as any).referralCode
+      : emailPrefix
+      ? emailPrefix.slice(0, 8) || randomCode(8)
+      : auth.id.replace(/-/g, "").slice(0, 8).toUpperCase();
+
+  const fallbackSubId =
+    (auth as any).subIdPrefix ||
+    (emailPrefix
+      ? emailPrefix.slice(0, 6) || randomCode(6)
+      : auth.id.replace(/-/g, "").slice(0, 6).toUpperCase());
+
   return {
     ...DEMO_USER,
     id: auth.id,
     email: auth.email || DEMO_USER.email,
     name: auth.user_metadata?.name || DEMO_USER.name,
     role: targetRole,
+    referralCode: fallbackRefCode,
+    subIdPrefix: fallbackSubId,
   };
 }
 
