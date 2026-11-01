@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { getApiUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -36,9 +37,19 @@ export async function POST(req: Request) {
     }
 
     const { otp } = result.data;
+    const cleanOtp = otp.trim();
+
+    let cookieToken: string | null = null;
+    let cookieStore: any = null;
+    try {
+      cookieStore = await cookies();
+      cookieToken = cookieStore.get("kamai_pending_otp")?.value || null;
+    } catch {
+      // outside request scope
+    }
 
     // 1. Verify withdrawal OTP
-    const verification = verifyWithdrawalOtp({ userId: user.id, otp });
+    const verification = verifyWithdrawalOtp({ userId: user.id, otp: cleanOtp, cookieToken });
     if (!verification.ok || !verification.data) {
       return NextResponse.json(
         { error: verification.error || "Invalid or expired withdrawal OTP." },
@@ -47,6 +58,15 @@ export async function POST(req: Request) {
     }
 
     const pending = verification.data;
+    const amountPaise = pending.amountPaise || 0;
+    const upiId = (pending.upiId || "").trim();
+    if (!amountPaise || amountPaise <= 0 || !upiId) {
+      return NextResponse.json(
+        { error: "Invalid withdrawal parameters in verification token." },
+        { status: 400 }
+      );
+    }
+    const accountHolder = (pending.accountHolder || user.name || "EarnKaro Partner").trim();
 
     // 2. Double-check available balance
     let availablePaise = 0;
@@ -81,7 +101,7 @@ export async function POST(req: Request) {
       availablePaise = getUserBalances(user.id).available;
     }
 
-    if (pending.amountPaise > availablePaise) {
+    if (amountPaise > availablePaise) {
       return NextResponse.json(
         {
           error: `Insufficient available balance to complete this withdrawal. Available: ${formatINR(
@@ -101,12 +121,12 @@ export async function POST(req: Request) {
           const w = await tx.withdrawal.create({
             data: {
               userId: user.id,
-              amountPaise: pending.amountPaise,
+              amountPaise: amountPaise,
               status: "REQUESTED",
               method: "UPI",
               payoutSnapshot: {
-                upiId: pending.upiId,
-                accountHolder: pending.accountHolder,
+                upiId: upiId,
+                accountHolder: accountHolder,
               },
             },
           });
@@ -125,7 +145,7 @@ export async function POST(req: Request) {
           let claimed = 0;
           const claimedIds: string[] = [];
           for (const row of availableRows) {
-            if (claimed >= pending.amountPaise) break;
+            if (claimed >= amountPaise) break;
             claimed += row.userAmountPaise;
             claimedIds.push(row.id);
           }
@@ -147,12 +167,16 @@ export async function POST(req: Request) {
     // 4. Runtime / sandbox fallback
     if (!withdrawalRecord) {
       withdrawalRecord = recordWithdrawalRequest(
-        pending.amountPaise,
-        pending.upiId,
-        pending.accountHolder,
+        amountPaise,
+        upiId,
+        accountHolder,
         user.id
       );
     }
+
+    try {
+      cookieStore?.delete("kamai_pending_otp");
+    } catch {}
 
     return NextResponse.json({
       success: true,

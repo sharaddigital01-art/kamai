@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     }
 
     // -------------------------------------------------------------
-    // Flow A: OTP Login (SMS or Email OTP)
+    // Flow A: OTP Login (Email OTP)
     // -------------------------------------------------------------
     if (otp) {
       const norm = normalizeIdentifier(rawTarget);
@@ -59,10 +59,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: norm.error }, { status: 400 });
       }
 
-      // Verify OTP against store or mock/test OTP 123456
+      let cookieToken: string | null = null;
+      let cookieStore: any = null;
+      try {
+        cookieStore = await cookies();
+        cookieToken = cookieStore.get("kamai_pending_otp")?.value || null;
+      } catch {
+        // outside request scope
+      }
+
+      // Verify OTP against unified Brevo store or mock/test OTP 123456
       const verification = verifyLoginOtp({
         identifier: norm.normalized,
         otp,
+        cookieToken,
       });
 
       if (!verification.ok) {
@@ -172,6 +182,8 @@ export async function POST(req: Request) {
           path: "/",
           maxAge: 60 * 60 * 24 * 7,
         });
+
+        store.delete("kamai_pending_otp");
       } catch (cookieErr: any) {
         console.warn("Session cookie set notice (e.g. outside request context):", cookieErr?.message || cookieErr);
       }

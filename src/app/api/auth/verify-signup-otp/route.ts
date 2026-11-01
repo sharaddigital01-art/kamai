@@ -1,29 +1,28 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { randomCode } from "@/lib/shortcode";
-import { createSupabaseServer } from "@/lib/supabase/server";
 import {
   isDatabaseConfigured,
-  isSupabaseConfigured,
   createMockUser,
   findMockUserByEmail,
   getUserBalances,
 } from "@/lib/mockData";
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
-import { verifySignupOtp } from "@/lib/otp";
+import { verifyUnifiedOtp } from "@/lib/otp";
 
 export const runtime = "nodejs";
 
 const VerifySchema = z.object({
   email: z.string().trim().email("Please enter a valid email address").toLowerCase(),
-  otp: z.string().trim().min(6, "Please enter the 6-digit OTP").max(6),
+  otp: z.string().trim().min(1, "Please enter the verification code"),
 });
 
 export async function POST(req: Request) {
   try {
-    const json = await req.json();
+    const json = await req.json().catch(() => ({}));
     const result = VerifySchema.safeParse(json);
     if (!result.success) {
       return NextResponse.json(
@@ -33,49 +32,39 @@ export async function POST(req: Request) {
     }
 
     const { email, otp } = result.data;
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanInputOtp = otp.trim();
 
-    // 1. Verify OTP from our secure OTP store
-    const verification = verifySignupOtp({ email, otp });
+    // Read serverless cookie if present
+    let cookieToken: string | null = null;
+    let cookieStore: any = null;
+    try {
+      cookieStore = await cookies();
+      cookieToken = cookieStore.get("kamai_pending_otp")?.value || null;
+    } catch {
+      // outside request context
+    }
+
+    // 1. Verify against Unified Brevo OTP Store
+    const verification = verifyUnifiedOtp({
+      email: cleanEmail,
+      otp: cleanInputOtp,
+      cookieToken,
+    });
+
     if (!verification.ok || !verification.data) {
       return NextResponse.json(
-        { error: verification.error || "Invalid or expired OTP. Please try again." },
+        { error: verification.error || "Invalid or expired verification code." },
         { status: 400 }
       );
     }
 
     const pending = verification.data;
-    const isAdmin = isAdminEmail(email);
+    const isAdmin = isAdminEmail(cleanEmail);
     const role = isAdmin ? "ADMIN" : "USER";
+    const authUserId = crypto.randomUUID();
 
-    let authUserId = crypto.randomUUID();
-
-    // 2. Finalize user in Supabase Auth if configured
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = await createSupabaseServer();
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email,
-          password: pending.password,
-          options: {
-            data: {
-              name: pending.name,
-              phone: pending.phone,
-              is_verified: true,
-            },
-          },
-        });
-
-        if (authData?.user?.id) {
-          authUserId = authData.user.id;
-        } else if (authError) {
-          console.warn("Supabase Auth finalization warning:", authError.message);
-        }
-      } catch (err: any) {
-        console.warn("Supabase Auth verify notice:", err?.message || err);
-      }
-    }
-
-    // 3. Create or link record in the User database table
+    // 2. Create or link record in database (no duplicate Supabase email sent)
     let createdUser: any = null;
 
     if (isDatabaseConfigured()) {
@@ -91,9 +80,9 @@ export async function POST(req: Request) {
         createdUser = await prisma.user.create({
           data: {
             id: authUserId,
-            email,
+            email: cleanEmail,
             phone: pending.phone || null,
-            name: pending.name,
+            name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
             role,
             referralCode: randomCode(8),
             subIdPrefix: randomCode(6),
@@ -105,13 +94,13 @@ export async function POST(req: Request) {
       }
     }
 
-    // 4. Runtime / sandbox fallback user store
+    // 3. Runtime / sandbox fallback user store
     if (!createdUser) {
       createdUser = createMockUser({
         id: authUserId,
-        email,
-        phone: pending.phone,
-        name: pending.name,
+        email: cleanEmail,
+        phone: pending.phone || null,
+        name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
         role,
         isVerified: true,
         referralCode: randomCode(8),
@@ -119,32 +108,43 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. Initialize wallet ledger balance to exactly ₹0.00
-    const initialBalances = getUserBalances(createdUser.id);
-    initialBalances.available = 0;
-    initialBalances.pending = 0;
-    initialBalances.inWithdrawal = 0;
-    initialBalances.paid = 0;
-    initialBalances.lifetime = 0;
+    // 4. Initialize wallet ledger balance to exactly ₹0.00
+    try {
+      const initialBalances = getUserBalances(createdUser.id);
+      initialBalances.available = 0;
+      initialBalances.pending = 0;
+      initialBalances.inWithdrawal = 0;
+      initialBalances.paid = 0;
+      initialBalances.lifetime = 0;
+    } catch {
+      // ignore
+    }
 
-    // 6. Set persistent authenticated session cookie (7 days)
-    const store = await cookies();
-    const sessionPayload = {
-      id: createdUser.id,
-      email: createdUser.email,
-      phone: createdUser.phone || pending.phone,
-      name: createdUser.name,
-      role: createdUser.role,
-      referralCode: createdUser.referralCode,
-      createdAt: new Date().toISOString(),
-    };
+    // 5. Set persistent authenticated session cookie (7 days) & clear pending OTP
+    try {
+      if (cookieStore) {
+        const sessionPayload = {
+          id: createdUser.id,
+          email: createdUser.email,
+          phone: createdUser.phone || null,
+          name: createdUser.name,
+          role: createdUser.role,
+          referralCode: createdUser.referralCode,
+          createdAt: new Date().toISOString(),
+        };
 
-    store.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
-      httpOnly: false,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    });
+        cookieStore.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
+          httpOnly: false,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 7,
+        });
+
+        cookieStore.delete("kamai_pending_otp");
+      }
+    } catch (cookieErr: any) {
+      console.warn("Session cookie set notice:", cookieErr?.message || cookieErr);
+    }
 
     return NextResponse.json(
       {
@@ -153,7 +153,7 @@ export async function POST(req: Request) {
         user: {
           id: createdUser.id,
           email: createdUser.email,
-          phone: createdUser.phone || pending.phone,
+          phone: createdUser.phone || null,
           name: createdUser.name,
           role: createdUser.role,
           referralCode: createdUser.referralCode,

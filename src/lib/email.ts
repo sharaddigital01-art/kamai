@@ -195,24 +195,6 @@ export async function sendOtpEmail(
     textContent: `${headline}\n\nYour 6-digit verification code: ${otpCode}\n\nValid for 10 minutes.\nNever share this code with anyone.\n\nKamai Karo Support (support@kamaikaro.in)`,
   });
 
-  // 2. Also trigger Supabase Auth OTP delivery for login/signup if configured
-  if (type === "login" || type === "signup") {
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = await createSupabaseServer();
-        await supabase.auth.signInWithOtp({
-          email: cleanEmail,
-          options: {
-            shouldCreateUser: true,
-            data: toName ? { name: toName } : undefined,
-          },
-        });
-      } catch (err: any) {
-        console.warn("Supabase Auth signInWithOtp notice:", err?.message || err);
-      }
-    }
-  }
-
   return {
     ok: brevoRes.ok,
     brevoMessageId: brevoRes.messageId,

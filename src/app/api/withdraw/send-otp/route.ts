@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { getApiUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -106,6 +107,21 @@ export async function POST(req: Request) {
         { error: otpResult.error || "Please wait before requesting another withdrawal OTP." },
         { status: 429 }
       );
+    }
+
+    try {
+      const store = await cookies();
+      if (otpResult.cookieValue) {
+        store.set("kamai_pending_otp", otpResult.cookieValue, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+          maxAge: 600,
+        });
+      }
+    } catch {
+      // outside request scope
     }
 
     return NextResponse.json({

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { createLoginOtp } from "@/lib/otp";
 
@@ -52,6 +53,22 @@ export async function POST(req: Request) {
         },
         { status: otpResult.resendAfterSeconds ? 429 : 400 }
       );
+    }
+
+    // Set serverless-resilient cookie
+    try {
+      const store = await cookies();
+      if (otpResult.cookieValue) {
+        store.set("kamai_pending_otp", otpResult.cookieValue, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+          maxAge: 600,
+        });
+      }
+    } catch {
+      // outside request scope
     }
 
     const isNonProd = process.env.NODE_ENV !== "production";

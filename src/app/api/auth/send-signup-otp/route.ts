@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import {
@@ -19,7 +20,7 @@ const RequestSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-    const json = await req.json();
+    const json = await req.json().catch(() => ({}));
     const result = RequestSchema.safeParse(json);
     if (!result.success) {
       return NextResponse.json(
@@ -29,12 +30,13 @@ export async function POST(req: Request) {
     }
 
     const { name, email, phone, password, referralCode } = result.data;
+    const cleanEmail = email.trim().toLowerCase();
 
     // 1. Check if an account already exists with this email
     if (isDatabaseConfigured()) {
       try {
         const existing = await prisma.user.findFirst({
-          where: { email },
+          where: { email: cleanEmail },
         });
 
         if (existing) {
@@ -49,7 +51,7 @@ export async function POST(req: Request) {
     }
 
     // Check mock fallback store
-    const existingMockEmail = findMockUserByEmail(email);
+    const existingMockEmail = findMockUserByEmail(cleanEmail);
     if (existingMockEmail) {
       return NextResponse.json(
         { error: "An account with this email address already exists. Please log in." },
@@ -57,10 +59,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Generate and store OTP, triggering transactional email via Brevo / Supabase
+    // 2. Generate and store OTP, triggering transactional email ONLY via Brevo
     const otpResult = await createSignupOtp({
       name,
-      email,
+      email: cleanEmail,
       phone: phone?.trim() || undefined,
       password,
       referralCode,
@@ -73,9 +75,25 @@ export async function POST(req: Request) {
       );
     }
 
+    // Set serverless-resilient cookie
+    try {
+      const store = await cookies();
+      if (otpResult.cookieValue) {
+        store.set("kamai_pending_otp", otpResult.cookieValue, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+          maxAge: 600,
+        });
+      }
+    } catch {
+      // outside request scope
+    }
+
     return NextResponse.json({
       success: true,
-      message: `A 6-digit verification code has been sent to ${email} via support@kamaikaro.in.`,
+      message: `A 6-digit verification code has been sent to ${cleanEmail} via support@kamaikaro.in.`,
       resendAfterSeconds: otpResult.resendAfterSeconds || 60,
       demoOtp: process.env.NODE_ENV !== "production" ? otpResult.code : undefined,
     });

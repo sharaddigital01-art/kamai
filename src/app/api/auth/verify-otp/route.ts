@@ -7,11 +7,10 @@ import { randomCode } from "@/lib/shortcode";
 import {
   isDatabaseConfigured,
   findMockUserByEmail,
-  findMockUserByPhone,
   createMockUser,
 } from "@/lib/mockData";
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
-import { normalizeIdentifier, verifyLoginOtp } from "@/lib/otp";
+import { verifyUnifiedOtp } from "@/lib/otp";
 
 export const runtime = "nodejs";
 
@@ -20,7 +19,7 @@ const VerifyOtpSchema = z.object({
   emailOrPhone: z.string().trim().optional(),
   email: z.string().trim().optional(),
   phone: z.string().trim().optional(),
-  otp: z.string().trim().min(6, "Please enter the 6-digit OTP").max(6),
+  otp: z.string().trim().min(1, "Please enter the verification code"),
 });
 
 export async function POST(req: Request) {
@@ -35,66 +34,70 @@ export async function POST(req: Request) {
     }
 
     const { identifier, emailOrPhone, email, phone, otp } = result.data;
-    const rawTarget = identifier || emailOrPhone || email || phone || "";
+    const cleanEmail = (email || identifier || emailOrPhone || phone || "").trim().toLowerCase();
+    const cleanInputOtp = otp.trim();
 
-    if (!rawTarget) {
+    if (!cleanEmail) {
       return NextResponse.json(
         { error: "Please enter your email address." },
         { status: 400 }
       );
     }
 
-    const norm = normalizeIdentifier(rawTarget);
-    if (norm.error) {
-      return NextResponse.json({ error: norm.error }, { status: 400 });
+    // Read serverless cookie if present
+    let cookieToken: string | null = null;
+    let cookieStore: any = null;
+    try {
+      cookieStore = await cookies();
+      cookieToken = cookieStore.get("kamai_pending_otp")?.value || null;
+    } catch {
+      // outside request context
     }
 
-    const verification = verifyLoginOtp({
-      identifier: norm.normalized,
-      otp,
+    // Verify against Unified Brevo OTP store
+    const verification = verifyUnifiedOtp({
+      email: cleanEmail,
+      otp: cleanInputOtp,
+      cookieToken,
     });
 
-    if (!verification.ok) {
+    if (!verification.ok || !verification.data) {
       return NextResponse.json(
-        { error: verification.error || "Invalid or expired OTP." },
+        { error: verification.error || "Invalid verification code. Please check your email and try again." },
         { status: 400 }
       );
     }
 
-    const isAdmin = norm.type === "email" ? isAdminEmail(norm.normalized) : false;
+    const pending = verification.data;
+    const isAdmin = isAdminEmail(cleanEmail);
     let user: any = null;
 
+    // 1. Database Lookup or Creation
     if (isDatabaseConfigured()) {
       try {
-        if (norm.type === "email") {
-          user = await prisma.user.findFirst({
-            where: { email: norm.normalized },
-          });
-        } else {
-          user = await prisma.user.findFirst({
-            where: {
-              OR: [
-                { phone: norm.normalized },
-                ...(norm.cleanDigits ? [{ phone: norm.cleanDigits }] : []),
-              ],
-            },
-          });
-        }
+        user = await prisma.user.findFirst({
+          where: { email: cleanEmail },
+        });
 
         if (!user) {
+          let referredById: string | null = null;
+          if (pending.referralCode) {
+            const referrer = await prisma.user.findUnique({
+              where: { referralCode: pending.referralCode },
+            });
+            if (referrer) referredById = referrer.id;
+          }
+
           const generatedId = crypto.randomUUID();
           user = await prisma.user.create({
             data: {
               id: generatedId,
-              email: norm.type === "email" ? norm.normalized : null,
-              phone: norm.type === "phone" ? norm.normalized : null,
-              name:
-                norm.type === "email"
-                  ? norm.normalized.split("@")[0]
-                  : `Partner ${norm.cleanDigits?.slice(-4) || ""}`.trim(),
+              email: cleanEmail,
+              name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
               role: isAdmin ? "ADMIN" : "USER",
               referralCode: randomCode(8),
               subIdPrefix: randomCode(6),
+              referredById,
             },
           });
         } else if (isAdmin && user.role !== "ADMIN") {
@@ -108,30 +111,16 @@ export async function POST(req: Request) {
       }
     }
 
+    // 2. Mock Fallback Store if DB unavailable
     if (!user) {
-      if (norm.type === "email") {
-        const existingMock = findMockUserByEmail(norm.normalized);
-        if (existingMock) {
-          user = { ...existingMock, role: isAdmin ? "ADMIN" : existingMock.role };
-        }
-      } else if (norm.cleanDigits) {
-        const existingMock = findMockUserByPhone(norm.cleanDigits);
-        if (existingMock) {
-          user = existingMock;
-        }
-      }
-
-      if (!user) {
-        const fallbackName =
-          (norm.type === "email"
-            ? norm.normalized.split("@")[0]
-            : `Partner ${norm.cleanDigits?.slice(-4) || ""}`.trim()) || "EarnKaro Partner";
-
+      const existingMock = findMockUserByEmail(cleanEmail);
+      if (existingMock) {
+        user = { ...existingMock, role: isAdmin ? "ADMIN" : existingMock.role };
+      } else {
         user = createMockUser({
           id: crypto.randomUUID(),
-          email: norm.type === "email" ? norm.normalized : `user_${randomCode(6)}@kamai.local`,
-          phone: norm.type === "phone" ? norm.normalized : null,
-          name: fallbackName,
+          email: cleanEmail,
+          name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
           role: isAdmin ? "ADMIN" : "USER",
           referralCode: randomCode(8),
           subIdPrefix: randomCode(6),
@@ -139,41 +128,44 @@ export async function POST(req: Request) {
       }
     }
 
+    // 3. Set persistent authenticated session cookie (7 days) & clear pending OTP
     try {
-      const store = await cookies();
-      const sessionPayload = {
-        id: user.id,
-        email: user.email || null,
-        phone: user.phone || null,
-        name: user.name || "EarnKaro Partner",
-        role: user.role || "USER",
-        referralCode: user.referralCode,
-        createdAt: user.createdAt || new Date().toISOString(),
-      };
+      if (cookieStore) {
+        const sessionPayload = {
+          id: user.id,
+          email: user.email || cleanEmail,
+          name: user.name || "EarnKaro Partner",
+          role: user.role || "USER",
+          referralCode: user.referralCode,
+          createdAt: user.createdAt || new Date().toISOString(),
+        };
 
-      store.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
-        httpOnly: false,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 7,
-      });
+        cookieStore.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
+          httpOnly: false,
+          sameSite: "lax",
+          path: "/",
+          maxAge: 60 * 60 * 24 * 7,
+        });
+
+        cookieStore.delete("kamai_pending_otp");
+      }
     } catch (cookieErr: any) {
-      console.warn("Session cookie set notice (e.g. outside request context):", cookieErr?.message || cookieErr);
+      console.warn("Session cookie set notice:", cookieErr?.message || cookieErr);
     }
 
     return NextResponse.json({
       success: true,
-      message: "Successfully signed in via OTP.",
+      message: "Successfully verified and signed in.",
       user: {
         id: user.id,
-        email: user.email,
-        phone: user.phone,
+        email: user.email || cleanEmail,
         name: user.name,
         role: user.role,
         referralCode: user.referralCode,
       },
     });
   } catch (err: any) {
+    console.error("verify-otp error:", err);
     return NextResponse.json(
       { error: err?.message || "Failed to verify OTP." },
       { status: 500 }
