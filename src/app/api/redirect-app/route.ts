@@ -67,8 +67,10 @@ export async function GET(request: NextRequest) {
 
   <script>
     (function() {
+      const serverTarget = ${JSON.stringify(target)};
       const params = new URLSearchParams(window.location.search);
-      const target = params.get('url');
+      const clientTarget = params.get('url');
+      const target = serverTarget || clientTarget || "";
 
       if (target) {
         const linkEl = document.getElementById('targetLink');
