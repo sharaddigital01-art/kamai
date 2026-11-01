@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { POST as sendOtpHandler } from "../app/api/auth/send-otp/route";
 import { POST as loginHandler } from "../app/api/auth/login/route";
 import { POST as verifyOtpHandler } from "../app/api/auth/verify-otp/route";
 
-describe("Web Login Authentication & OTP Flow", () => {
-  it("sends OTP for valid mobile number and returns demoOtp in non-production", async () => {
+describe("Web Login Authentication & Email OTP Flow", () => {
+  it("sends Email OTP for valid email and returns demoOtp in non-production", async () => {
     const req = new Request("http://localhost:3000/api/auth/send-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: "9876543219" }),
+      body: JSON.stringify({ email: "newpartner@kamai.local" }),
     });
 
     const res = await sendOtpHandler(req);
@@ -19,16 +19,17 @@ describe("Web Login Authentication & OTP Flow", () => {
     expect(data.demoOtp).toBeDefined();
     expect(data.demoOtp).toMatch(/^\d{6}$/);
     expect(data.resendAfterSeconds).toBe(60);
+    expect(data.message).toContain("support@kamaikaro.in");
   });
 
-  it("enforces rate-limit (429) on rapid resend of OTP", async () => {
-    const targetPhone = "9876543218";
+  it("enforces rate-limit (429) on rapid resend of Email OTP", async () => {
+    const targetEmail = "ratelimit_test@kamai.local";
 
     // First request
     const req1 = new Request("http://localhost:3000/api/auth/send-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: targetPhone }),
+      body: JSON.stringify({ email: targetEmail }),
     });
     const res1 = await sendOtpHandler(req1);
     expect(res1.status).toBe(200);
@@ -37,7 +38,7 @@ describe("Web Login Authentication & OTP Flow", () => {
     const req2 = new Request("http://localhost:3000/api/auth/send-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: targetPhone }),
+      body: JSON.stringify({ email: targetEmail }),
     });
     const res2 = await sendOtpHandler(req2);
     const data2 = await res2.json();
@@ -47,12 +48,27 @@ describe("Web Login Authentication & OTP Flow", () => {
     expect(data2.resendAfterSeconds).toBeGreaterThan(0);
   });
 
-  it("logs in successfully via OTP in /api/auth/login with test OTP 123456", async () => {
+  it("rejects invalid email formats with 400", async () => {
+    const req = new Request("http://localhost:3000/api/auth/send-otp", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "invalid-email-address" }),
+    });
+
+    const res = await sendOtpHandler(req);
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toContain("valid email");
+  });
+
+  it("logs in successfully via Email OTP in /api/auth/login with test OTP 123456", async () => {
+    const testEmail = "otpuser@kamai.local";
     const loginReq = new Request("http://localhost:3000/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        identifier: "9876543217",
+        email: testEmail,
         otp: "123456",
       }),
     });
@@ -63,16 +79,16 @@ describe("Web Login Authentication & OTP Flow", () => {
     expect(res.status).toBe(200);
     expect(data.success).toBe(true);
     expect(data.user).toBeDefined();
-    expect(data.user.phone).toBe("+919876543217");
+    expect(data.user.email).toBe(testEmail);
   });
 
-  it("verifies OTP via /api/auth/verify-otp endpoint", async () => {
+  it("verifies Email OTP via /api/auth/verify-otp endpoint", async () => {
     const testEmail = "partner_test_verify@kamai.local";
     const verifyReq = new Request("http://localhost:3000/api/auth/verify-otp", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        identifier: testEmail,
+        email: testEmail,
         otp: "123456",
       }),
     });
@@ -106,13 +122,12 @@ describe("Web Login Authentication & OTP Flow", () => {
   });
 
   it("rejects invalid OTP with 400 error", async () => {
-    // Send OTP first
     const email = "invalid_otp_test@kamai.local";
     await sendOtpHandler(
       new Request("http://localhost:3000/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: email }),
+        body: JSON.stringify({ email }),
       })
     );
 
@@ -120,7 +135,7 @@ describe("Web Login Authentication & OTP Flow", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        identifier: email,
+        email,
         otp: "000000",
       }),
     });

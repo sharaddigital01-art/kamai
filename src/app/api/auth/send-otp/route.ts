@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { normalizeIdentifier, createLoginOtp } from "@/lib/otp";
+import { createLoginOtp } from "@/lib/otp";
 
 export const runtime = "nodejs";
 
 const SendOtpSchema = z.object({
+  email: z.string().trim().optional(),
   identifier: z.string().trim().optional(),
   emailOrPhone: z.string().trim().optional(),
-  email: z.string().trim().optional(),
-  phone: z.string().trim().optional(),
 });
 
 export async function POST(req: Request) {
@@ -22,27 +21,27 @@ export async function POST(req: Request) {
       );
     }
 
-    const { identifier, emailOrPhone, email, phone } = result.data;
-    const rawTarget = identifier || emailOrPhone || phone || email || "";
+    const { identifier, emailOrPhone, email } = result.data;
+    const rawTarget = (email || identifier || emailOrPhone || "").trim().toLowerCase();
 
     if (!rawTarget) {
       return NextResponse.json(
-        { error: "Please enter your mobile number or email address." },
+        { error: "Please enter your email address." },
         { status: 400 }
       );
     }
 
-    const norm = normalizeIdentifier(rawTarget);
-    if (norm.error) {
+    // Strictly Email-first verification
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawTarget)) {
       return NextResponse.json(
-        { error: norm.error },
+        { error: "Please enter a valid email address." },
         { status: 400 }
       );
     }
 
     const otpResult = await createLoginOtp({
-      identifier: norm.normalized,
-      type: norm.type,
+      identifier: rawTarget,
+      type: "email",
     });
 
     if (!otpResult.ok) {
@@ -56,15 +55,11 @@ export async function POST(req: Request) {
     }
 
     const isNonProd = process.env.NODE_ENV !== "production";
-    const displayTarget =
-      norm.type === "email"
-        ? norm.normalized
-        : `${norm.normalized.slice(0, 5)}••••${norm.normalized.slice(-3)}`;
 
     return NextResponse.json({
       success: true,
-      message: `A 6-digit verification code has been sent to ${displayTarget}.`,
-      type: norm.type,
+      message: `A 6-digit verification code has been sent to ${rawTarget} via support@kamaikaro.in.`,
+      email: rawTarget,
       resendAfterSeconds: otpResult.resendAfterSeconds || 60,
       demoOtp: isNonProd ? (otpResult.code || "123456") : undefined,
     });

@@ -39,7 +39,7 @@ export async function POST(req: Request) {
 
     if (!rawTarget) {
       return NextResponse.json(
-        { error: "Please enter your mobile number or email address." },
+        { error: "Please enter your email address." },
         { status: 400 }
       );
     }

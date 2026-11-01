@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Lock,
   Mail,
-  Smartphone,
   Eye,
   EyeOff,
   ArrowRight,
@@ -29,13 +28,13 @@ function LoginForm() {
   const [authMode, setAuthMode] = useState<"password" | "otp">("password");
 
   // --- Password Mode States ---
-  const [emailOrPhone, setEmailOrPhone] = useState("");
+  const [passwordEmail, setPasswordEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
   // --- OTP Mode States ---
-  const [otpStep, setOtpStep] = useState<1 | 2>(1); // 1 = identifier, 2 = enter otp
-  const [otpTarget, setOtpTarget] = useState("");
+  const [otpStep, setOtpStep] = useState<1 | 2>(1); // 1 = enter email, 2 = enter otp
+  const [otpEmail, setOtpEmail] = useState("");
   const [otpDigits, setOtpDigits] = useState<string[]>(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState<number>(0);
   const [demoOtp, setDemoOtp] = useState<string | null>(null);
@@ -78,16 +77,20 @@ function LoginForm() {
   }, [authMode, otpStep]);
 
   // ---------------------------------------------------------------------------
-  // Action: Direct Password Login
+  // Action: Direct Password Login (Email + Password)
   // ---------------------------------------------------------------------------
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccessNotice(null);
 
-    const trimmedInput = emailOrPhone.trim();
-    if (!trimmedInput || !password) {
-      setError("Please enter both your email/phone and password.");
+    const cleanEmail = passwordEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
       return;
     }
 
@@ -98,9 +101,7 @@ function LoginForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          identifier: trimmedInput,
-          emailOrPhone: trimmedInput,
-          email: trimmedInput.includes("@") ? trimmedInput : undefined,
+          email: cleanEmail,
           password,
         }),
       });
@@ -112,10 +113,10 @@ function LoginForm() {
           setIsRateLimited(true);
           setError(
             data.error ||
-              "Too many failed login attempts. Please wait a moment or sign in using OTP."
+              "Too many failed login attempts. Please wait a moment or sign in using Email OTP."
           );
         } else {
-          setError(data.error || "Invalid credentials. Please verify your details.");
+          setError(data.error || "Invalid credentials. Please verify your email and password.");
         }
         return;
       }
@@ -138,9 +139,9 @@ function LoginForm() {
     setError(null);
     setSuccessNotice(null);
 
-    const trimmedTarget = otpTarget.trim();
-    if (!trimmedTarget) {
-      setError("Please enter your mobile number or email address.");
+    const cleanEmail = otpEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setError("Please enter a valid email address.");
       return;
     }
 
@@ -151,8 +152,7 @@ function LoginForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          identifier: trimmedTarget,
-          emailOrPhone: trimmedTarget,
+          email: cleanEmail,
         }),
       });
 
@@ -170,7 +170,7 @@ function LoginForm() {
         } else {
           setError(
             data.error ||
-              "Could not send OTP. You can log in directly using your Password instead."
+              "Could not send email OTP. You can log in directly using your Password instead."
           );
         }
         return;
@@ -183,7 +183,7 @@ function LoginForm() {
       const cooldownSec = data.resendAfterSeconds || 60;
       setCountdown(cooldownSec);
       setIsRateLimited(false);
-      setSuccessNotice(data.message || "Verification code sent successfully.");
+      setSuccessNotice(data.message || `Verification code sent to ${cleanEmail}.`);
       setOtpStep(2);
     } catch {
       setError("Network connection issue. Please try again or use Password Login.");
@@ -202,10 +202,11 @@ function LoginForm() {
     setResending(true);
 
     try {
+      const cleanEmail = otpEmail.trim().toLowerCase();
       const res = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ identifier: otpTarget.trim() }),
+        body: JSON.stringify({ email: cleanEmail }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -224,7 +225,7 @@ function LoginForm() {
       }
       setCountdown(data.resendAfterSeconds || 60);
       setIsRateLimited(false);
-      setSuccessNotice("New verification code sent!");
+      setSuccessNotice("New verification code sent to your email!");
       setOtpDigits(["", "", "", "", "", ""]);
       otpInputRefs.current[0]?.focus();
     } catch {
@@ -254,7 +255,7 @@ function LoginForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          identifier: otpTarget.trim(),
+          email: otpEmail.trim().toLowerCase(),
           otp: enteredOtp,
         }),
       });
@@ -301,7 +302,6 @@ function LoginForm() {
     updated[index] = digit;
     setOtpDigits(updated);
 
-    // Auto-advance to next input
     if (index < 5) {
       otpInputRefs.current[index + 1]?.focus();
     }
@@ -322,7 +322,7 @@ function LoginForm() {
 
   function fillAdminDemo() {
     setAuthMode("password");
-    setEmailOrPhone("admin@earnkaro.com");
+    setPasswordEmail("admin@earnkaro.com");
     setPassword("admin123456");
     setError(null);
   }
@@ -341,11 +341,11 @@ function LoginForm() {
             Log In to EarnKaro
           </h1>
           <p className="mt-1 text-xs text-emerald-100">
-            Earn extra income by sharing festive deals & brand links
+            Sign in using your email address to access your deals and dashboard
           </p>
         </div>
 
-        {/* Tab Switcher: Password Login vs OTP Login */}
+        {/* Tab Switcher: Password Login vs Email OTP Login */}
         <div className="border-b border-gray-100 bg-[#F9FBFA] p-2">
           <div className="grid grid-cols-2 gap-1 rounded-2xl bg-gray-200/60 p-1 text-xs font-bold">
             <button
@@ -376,8 +376,8 @@ function LoginForm() {
                   : "text-ink-soft hover:text-ink"
               }`}
             >
-              <Smartphone className="h-3.5 w-3.5" />
-              <span>OTP Login</span>
+              <Mail className="h-3.5 w-3.5" />
+              <span>Email OTP Login</span>
             </button>
           </div>
         </div>
@@ -395,7 +395,6 @@ function LoginForm() {
                 <span className="flex-1 leading-relaxed">{error}</span>
               </div>
 
-              {/* Helpful suggestions on rate limit or provider delay */}
               {isRateLimited && (
                 <div className="mt-1 flex items-center justify-between border-t border-red-200/60 pt-2 text-[11px]">
                   <span className="font-medium text-red-800">
@@ -421,7 +420,7 @@ function LoginForm() {
                       }}
                       className="font-bold text-[#169443] hover:underline"
                     >
-                      Try OTP Login →
+                      Try Email OTP →
                     </button>
                   )}
                 </div>
@@ -444,17 +443,17 @@ function LoginForm() {
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
-                  Email or Mobile Number
+                  Email Address
                 </label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
                   <input
-                    type="text"
+                    type="email"
                     required
-                    autoComplete="username"
-                    placeholder="name@example.com or 9876543210"
-                    value={emailOrPhone}
-                    onChange={(e) => setEmailOrPhone(e.target.value)}
+                    autoComplete="email"
+                    placeholder="name@example.com"
+                    value={passwordEmail}
+                    onChange={(e) => setPasswordEmail(e.target.value)}
                     className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
                   />
                 </div>
@@ -509,27 +508,28 @@ function LoginForm() {
           )}
 
           {/* ================================================================= */}
-          {/* TAB 2: OTP Login (Step 1: Enter Identifier)                        */}
+          {/* TAB 2: Email OTP Login (Step 1: Enter Email)                       */}
           {/* ================================================================= */}
           {authMode === "otp" && otpStep === 1 && (
             <form onSubmit={handleSendOtp} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
-                  Mobile Number or Email
+                  Email Address
                 </label>
                 <div className="relative">
-                  <Smartphone className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
+                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
                   <input
-                    type="text"
+                    type="email"
                     required
-                    placeholder="e.g. 9876543210 or name@example.com"
-                    value={otpTarget}
-                    onChange={(e) => setOtpTarget(e.target.value)}
+                    autoComplete="email"
+                    placeholder="name@example.com"
+                    value={otpEmail}
+                    onChange={(e) => setOtpEmail(e.target.value)}
                     className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
                   />
                 </div>
                 <p className="mt-1.5 text-[11px] text-ink-soft">
-                  We'll send a 6-digit one-time password to verify your identity.
+                  We will send a 6-digit verification code to your email via Brevo (<span className="text-[#169443] font-semibold">support@kamaikaro.in</span>).
                 </p>
               </div>
 
@@ -541,13 +541,13 @@ function LoginForm() {
                 {loading ? (
                   <>
                     <LoaderCircle className="h-4 w-4 animate-spin" />
-                    <span>Sending OTP...</span>
+                    <span>Sending Code to Email...</span>
                   </>
                 ) : countdown > 0 ? (
                   <span>Wait {countdown}s to Resend</span>
                 ) : (
                   <>
-                    <span>Get Verification Code</span>
+                    <span>Get Email Verification Code</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -556,7 +556,7 @@ function LoginForm() {
           )}
 
           {/* ================================================================= */}
-          {/* TAB 2: OTP Login (Step 2: Enter 6-digit Code)                     */}
+          {/* TAB 2: Email OTP Login (Step 2: Enter 6-digit Code)                */}
           {/* ================================================================= */}
           {authMode === "otp" && otpStep === 2 && (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
@@ -564,7 +564,7 @@ function LoginForm() {
                 <p className="text-xs text-ink-soft">
                   Enter the 6-digit verification code sent to
                 </p>
-                <p className="font-bold text-sm text-ink mt-0.5">{otpTarget}</p>
+                <p className="font-bold text-sm text-ink mt-0.5">{otpEmail}</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -575,7 +575,7 @@ function LoginForm() {
                   className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#169443] hover:underline"
                 >
                   <ArrowLeft className="h-3 w-3" />
-                  <span>Change number/email</span>
+                  <span>Change email address</span>
                 </button>
               </div>
 
@@ -617,7 +617,7 @@ function LoginForm() {
 
               {/* Resend Cooldown Countdown */}
               <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-ink-soft">Didn't receive code?</span>
+                <span className="text-ink-soft">Didn't receive email?</span>
                 {countdown > 0 ? (
                   <span className="font-semibold text-ink-soft">
                     Resend in {countdown}s

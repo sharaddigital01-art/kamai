@@ -45,7 +45,7 @@ export async function POST(req: Request) {
 
     if (!rawTarget) {
       return NextResponse.json(
-        { error: "Please enter your email or mobile number." },
+        { error: "Please enter your email address." },
         { status: 400 }
       );
     }
@@ -311,7 +311,7 @@ export async function POST(req: Request) {
         });
       } else {
         return NextResponse.json(
-          { error: "Invalid credentials. Please check your details or log in via OTP." },
+          { error: "Invalid credentials. Please check your email and password or log in via Email OTP." },
           { status: 401 }
         );
       }

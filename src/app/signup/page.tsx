@@ -7,7 +7,6 @@ import {
   Lock,
   Mail,
   User,
-  Phone,
   Eye,
   EyeOff,
   ArrowRight,
@@ -33,7 +32,6 @@ function SignupForm() {
   // Form Fields
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [referralCode, setReferralCode] = useState(refQuery);
   const [showPassword, setShowPassword] = useState(false);
@@ -73,23 +71,20 @@ function SignupForm() {
     }
   }, [step]);
 
-  // Step A: Send OTP
+  // Step A: Send OTP to Email
   async function handleSendOtp(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!name.trim()) {
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanName) {
       setError("Please enter your full name.");
       return;
     }
-    if (!email.trim() || !email.includes("@")) {
+    if (!cleanEmail || !cleanEmail.includes("@")) {
       setError("Please enter a valid email address.");
-      return;
-    }
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length !== 10 || !/^[6-9]/.test(cleanPhone)) {
-      setError("Please enter a valid 10-digit Indian mobile number starting with 6-9.");
       return;
     }
 
@@ -105,19 +100,17 @@ function SignupForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim().toLowerCase(),
-          phone: cleanPhone,
+          name: cleanName,
+          email: cleanEmail,
           password,
           referralCode: referralCode.trim() || undefined,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setError(data.error || "Failed to send OTP. Please try again.");
-        setLoading(false);
+        setError(data.error || "Failed to send email verification code. Please try again.");
         return;
       }
 
@@ -127,9 +120,9 @@ function SignupForm() {
       }
       setCountdown(data.resendAfterSeconds || 60);
       setStep(2);
-      setLoading(false);
     } catch {
-      setError("Network error. Please try again.");
+      setError("Network error. Please check your connection and try again.");
+    } finally {
       setLoading(false);
     }
   }
@@ -141,24 +134,24 @@ function SignupForm() {
     setResending(true);
 
     try {
-      const cleanPhone = phone.replace(/\D/g, "");
+      const cleanName = name.trim();
+      const cleanEmail = email.trim().toLowerCase();
+
       const res = await fetch("/api/auth/send-signup-otp", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
-          email: email.trim().toLowerCase(),
-          phone: cleanPhone,
+          name: cleanName,
+          email: cleanEmail,
           password,
           referralCode: referralCode.trim() || undefined,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setError(data.error || "Failed to resend OTP.");
-        setResending(false);
+        setError(data.error || "Failed to resend email verification code.");
         return;
       }
 
@@ -169,7 +162,7 @@ function SignupForm() {
       setOtpDigits(["", "", "", "", "", ""]);
       otpInputRefs.current[0]?.focus();
     } catch {
-      setError("Network error while resending OTP.");
+      setError("Network error while resending verification code.");
     } finally {
       setResending(false);
     }
@@ -178,55 +171,63 @@ function SignupForm() {
   // Handle individual OTP digit change
   function handleOtpChange(index: number, val: string) {
     const digit = val.slice(-1).replace(/\D/g, "");
-    const newDigits = [...otpDigits];
-    newDigits[index] = digit;
-    setOtpDigits(newDigits);
+    if (!digit) {
+      const updated = [...otpDigits];
+      updated[index] = "";
+      setOtpDigits(updated);
+      return;
+    }
 
-    // Auto-advance
-    if (digit && index < 5) {
+    if (val.length >= 6) {
+      const six = val.slice(0, 6).split("");
+      setOtpDigits(six);
+      otpInputRefs.current[5]?.focus();
+      return;
+    }
+
+    const updated = [...otpDigits];
+    updated[index] = digit;
+    setOtpDigits(updated);
+
+    if (index < 5) {
       otpInputRefs.current[index + 1]?.focus();
     }
   }
 
-  // Handle backspace navigation in OTP boxes
   function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
       otpInputRefs.current[index - 1]?.focus();
     }
   }
 
-  // Handle clipboard paste across OTP boxes
   function handleOtpPaste(e: React.ClipboardEvent<HTMLInputElement>) {
     e.preventDefault();
     const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
     if (!pasted) return;
 
-    const newDigits = [...otpDigits];
-    for (let i = 0; i < 6; i++) {
-      newDigits[i] = pasted[i] || "";
-    }
-    setOtpDigits(newDigits);
+    const chars = pasted.split("");
+    while (chars.length < 6) chars.push("");
+    setOtpDigits(chars);
 
-    const nextIdx = Math.min(pasted.length, 5);
-    otpInputRefs.current[nextIdx]?.focus();
+    const lastFilled = Math.min(pasted.length, 5);
+    otpInputRefs.current[lastFilled]?.focus();
   }
 
-  // Auto-fill demo OTP
   function fillDemoOtp() {
-    if (!demoOtp || demoOtp.length !== 6) return;
-    const digits = demoOtp.split("");
-    setOtpDigits(digits);
+    if (!demoOtp) return;
+    const chars = demoOtp.slice(0, 6).split("");
+    setOtpDigits(chars);
     otpInputRefs.current[5]?.focus();
   }
 
-  // Step B: Verify OTP and finalize signup
+  // Step B: Verify OTP & Create Account
   async function handleVerifyOtp(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    const fullOtp = otpDigits.join("");
-    if (fullOtp.length !== 6) {
-      setError("Please enter all 6 digits of the OTP.");
+    const enteredOtp = otpDigits.join("");
+    if (enteredOtp.length !== 6) {
+      setError("Please enter the complete 6-digit verification code.");
       return;
     }
 
@@ -238,15 +239,14 @@ function SignupForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
-          otp: fullOtp,
+          otp: enteredOtp,
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setError(data.error || "Invalid verification code.");
-        setLoading(false);
+        setError(data.error || "Invalid verification code. Please check your email and try again.");
         return;
       }
 
@@ -256,7 +256,8 @@ function SignupForm() {
         router.refresh();
       }, 1000);
     } catch {
-      setError("Network error while verifying OTP.");
+      setError("Network error while verifying code.");
+    } finally {
       setLoading(false);
     }
   }
@@ -281,7 +282,7 @@ function SignupForm() {
           <p className="mt-1 text-xs text-emerald-100">
             {step === 1
               ? "Register to start generating affiliate profit links"
-              : `6-digit verification code sent to ${email}`}
+              : `6-digit verification code sent to ${email} via support@kamaikaro.in`}
           </p>
 
           {/* Stepper Indicator */}
@@ -318,7 +319,7 @@ function SignupForm() {
             </div>
           )}
 
-          {/* STEP 1: Registration Input Form */}
+          {/* STEP 1: Registration Input Form (Strictly Email) */}
           {step === 1 && (
             <form onSubmit={handleSendOtp} className="space-y-4">
               <div>
@@ -355,32 +356,9 @@ function SignupForm() {
                     className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-10 pr-4 text-sm text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide flex items-center justify-between">
-                  <span>Mobile Number</span>
-                  <span className="text-[10px] text-ink-soft font-normal">10 Digits (+91)</span>
-                </label>
-                <div className="relative flex items-center">
-                  <div className="absolute left-3.5 flex items-center gap-1 pointer-events-none">
-                    <Phone className="h-4 w-4 text-ink-soft" />
-                    <span className="text-xs font-black text-ink pl-1 border-r border-ink-soft/30 pr-2">
-                      +91
-                    </span>
-                  </div>
-                  <input
-                    type="tel"
-                    required
-                    maxLength={10}
-                    inputMode="numeric"
-                    autoComplete="tel-national"
-                    placeholder="9876543210"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    className="w-full rounded-2xl bg-[#F4F6F5] py-3 pl-20 pr-4 text-sm font-medium tracking-wide text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition font-mono"
-                  />
-                </div>
+                <p className="mt-1 text-[11px] text-ink-soft">
+                  Verification OTP will be delivered directly to your inbox via <span className="font-semibold text-[#169443]">support@kamaikaro.in</span>.
+                </p>
               </div>
 
               <div>
@@ -435,11 +413,11 @@ function SignupForm() {
                 {loading ? (
                   <>
                     <LoaderCircle className="h-4 w-4 animate-spin" />
-                    <span>Sending OTP...</span>
+                    <span>Sending Code to Email...</span>
                   </>
                 ) : (
                   <>
-                    <span>Continue & Send OTP</span>
+                    <span>Continue & Send Email OTP</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -447,15 +425,15 @@ function SignupForm() {
             </form>
           )}
 
-          {/* STEP 2: 6-Digit OTP Verification Form */}
+          {/* STEP 2: 6-Digit Email OTP Verification Form */}
           {step === 2 && (
             <form onSubmit={handleVerifyOtp} className="space-y-5">
-              <div className="rounded-2xl bg-emerald-50/70 p-3.5 text-xs text-emerald-950 ring-1 ring-emerald-200/80">
+              <div className="rounded-2xl bg-emerald-50/70 p-3.5 text-xs text-emerald-950 ring-1 ring-emerald-200">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] text-emerald-700">Verifying Email</span>
-                    <p className="font-bold text-ink truncate max-w-[200px] sm:max-w-xs">{email}</p>
-                    <p className="text-[10px] text-ink-soft mt-0.5">Mobile: +91 {phone}</p>
+                    <span className="text-[11px] text-emerald-700">Verifying Partner Details</span>
+                    <p className="font-bold text-ink mt-0.5">{name}</p>
+                    <p className="text-[11px] text-ink-soft font-medium">{email}</p>
                   </div>
                   <button
                     type="button"
@@ -471,7 +449,11 @@ function SignupForm() {
                 </div>
               </div>
 
-              {/* Demo OTP Helper Badge (for instant sandbox testing) */}
+              <p className="text-center text-xs text-ink-soft">
+                Enter the 6-digit verification code sent to <strong className="text-ink">{email}</strong>.
+              </p>
+
+              {/* Demo OTP Helper Badge */}
               {demoOtp && (
                 <div className="flex items-center justify-between rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-300">
                   <div className="flex items-center gap-1.5">
@@ -490,39 +472,34 @@ function SignupForm() {
                 </div>
               )}
 
-              {/* 6 Digit OTP Inputs */}
-              <div>
-                <label className="block text-center text-xs font-bold uppercase tracking-wider text-ink mb-3">
-                  Enter 6-Digit Code
-                </label>
-                <div className="flex justify-between gap-1.5 sm:gap-2">
-                  {otpDigits.map((digit, idx) => (
-                    <input
-                      key={idx}
-                      ref={(el) => {
-                        otpInputRefs.current[idx] = el;
-                      }}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpChange(idx, e.target.value)}
-                      onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                      onPaste={idx === 0 ? handleOtpPaste : undefined}
-                      className="h-12 w-11 sm:h-14 sm:w-13 rounded-2xl bg-[#F4F6F5] text-center font-mono text-lg font-black text-ink outline-none ring-1 ring-black/10 focus:bg-white focus:ring-2 focus:ring-[#169443] transition shadow-sm"
-                    />
-                  ))}
-                </div>
+              {/* 6 Digit Inputs */}
+              <div className="flex justify-between gap-1.5 sm:gap-2">
+                {otpDigits.map((digit, idx) => (
+                  <input
+                    key={idx}
+                    ref={(el) => {
+                      otpInputRefs.current[idx] = el;
+                    }}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(idx, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                    onPaste={idx === 0 ? handleOtpPaste : undefined}
+                    className="h-12 w-11 sm:h-14 sm:w-13 rounded-2xl bg-[#F4F6F5] text-center font-mono text-lg font-black text-ink outline-none ring-1 ring-black/10 focus:bg-white focus:ring-2 focus:ring-[#169443] transition shadow-sm"
+                  />
+                ))}
               </div>
 
-              {/* Resend Countdown Timer */}
-              <div className="flex items-center justify-between pt-1 text-xs text-ink-soft">
+              {/* Countdown & Resend */}
+              <div className="flex items-center justify-between text-xs text-ink-soft">
                 {countdown > 0 ? (
-                  <span className="text-ink-soft">
+                  <span>
                     Resend code in <strong className="text-ink font-mono">00:{countdown.toString().padStart(2, "0")}</strong>
                   </span>
                 ) : (
-                  <span className="text-ink-soft">Didn&apos;t get the code?</span>
+                  <span>Didn&apos;t receive email?</span>
                 )}
 
                 <button
@@ -532,14 +509,14 @@ function SignupForm() {
                   className="font-bold text-[#169443] hover:underline disabled:text-ink-soft/50 disabled:no-underline flex items-center gap-1 transition"
                 >
                   <RotateCcw className={`h-3 w-3 ${resending ? "animate-spin" : ""}`} />
-                  <span>{resending ? "Sending..." : "Resend OTP"}</span>
+                  <span>{resending ? "Sending..." : "Resend Code"}</span>
                 </button>
               </div>
 
-              {/* Verify Button */}
+              {/* Confirm Button */}
               <button
                 type="submit"
-                disabled={loading || success || otpDigits.join("").length !== 6}
+                disabled={loading || otpDigits.join("").length !== 6}
                 className="flex w-full items-center justify-center gap-2 rounded-full bg-[#169443] py-3.5 font-bold text-white shadow-md hover:bg-[#13803a] active:scale-[0.99] transition disabled:opacity-50"
               >
                 {loading ? (
@@ -547,24 +524,19 @@ function SignupForm() {
                     <LoaderCircle className="h-4 w-4 animate-spin" />
                     <span>Verifying Code...</span>
                   </>
-                ) : success ? (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>Verified!</span>
-                  </>
                 ) : (
                   <>
+                    <ShieldCheck className="h-4 w-4" />
                     <span>Verify & Create Account</span>
-                    <ArrowRight className="h-4 w-4" />
                   </>
                 )}
               </button>
             </form>
           )}
 
-          {/* Switch to Login */}
+          {/* Already have an account */}
           <div className="mt-6 text-center text-xs text-ink-soft">
-            Already have an account?{" "}
+            Already have an EarnKaro account?{" "}
             <Link
               href={`/login${nextPath ? `?next=${encodeURIComponent(nextPath)}` : ""}`}
               className="font-bold text-[#169443] hover:underline"

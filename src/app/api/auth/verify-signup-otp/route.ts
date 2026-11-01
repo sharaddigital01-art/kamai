@@ -92,7 +92,7 @@ export async function POST(req: Request) {
           data: {
             id: authUserId,
             email,
-            phone: pending.phone,
+            phone: pending.phone || null,
             name: pending.name,
             role,
             referralCode: randomCode(8),

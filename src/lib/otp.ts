@@ -1,11 +1,13 @@
 import crypto from "crypto";
 import { isSupabaseConfigured } from "./mockData";
 import { createSupabaseServer } from "./supabase/server";
+import { formatINR } from "./money";
+import { sendOtpEmail } from "./email";
 
 export interface PendingSignupOtp {
   name: string;
   email: string;
-  phone: string; // "+91" + 10 digits
+  phone?: string; // Optional: Platform is strictly email-first
   password: string;
   referralCode?: string;
   code: string;
@@ -133,7 +135,7 @@ export function isValidUpiId(upi: string): boolean {
 export async function createSignupOtp(data: {
   name: string;
   email: string;
-  phone: string;
+  phone?: string;
   password: string;
   referralCode?: string;
 }): Promise<{
@@ -172,26 +174,19 @@ export async function createSignupOtp(data: {
 
   g.__kamai_signup_otps?.set(emailKey, pending);
 
-  // Attempt Supabase Auth signInWithOtp if configured
-  if (isSupabaseConfigured()) {
-    try {
-      const supabase = await createSupabaseServer();
-      await supabase.auth.signInWithOtp({
-        email: emailKey,
-        options: {
-          shouldCreateUser: true,
-          data: {
-            name: data.name.trim(),
-            phone: data.phone,
-          },
-        },
-      });
-    } catch (err: any) {
-      console.warn("Supabase Auth signInWithOtp notice (using app OTP):", err?.message || err);
-    }
+  // Send real transactional email via Brevo & Supabase
+  try {
+    await sendOtpEmail({
+      toEmail: emailKey,
+      toName: data.name.trim(),
+      otpCode: code,
+      type: "signup",
+    });
+  } catch (emailErr: any) {
+    console.warn("sendOtpEmail signup delivery notice:", emailErr?.message || emailErr);
   }
 
-  console.log(`[Kamai OTP] Registration OTP for ${emailKey} (${data.phone}): ${code}`);
+  console.log(`[Kamai OTP] Registration OTP for ${emailKey}: ${code}`);
 
   return {
     ok: true,
@@ -301,6 +296,20 @@ export async function createWithdrawalOtp(data: {
   };
 
   g.__kamai_withdrawal_otps?.set(data.userId, pending);
+
+  // Send real transactional email via Brevo from support@kamaikaro.in
+  try {
+    await sendOtpEmail({
+      toEmail: data.email,
+      toName: data.accountHolder || "EarnKaro Partner",
+      otpCode: code,
+      type: "withdrawal",
+      amountFormatted: formatINR(data.amountPaise),
+      upiId: data.upiId,
+    });
+  } catch (emailErr: any) {
+    console.warn("sendOtpEmail withdrawal delivery notice:", emailErr?.message || emailErr);
+  }
 
   console.log(
     `[Kamai OTP] Withdrawal OTP for ${data.email} | Amount: ₹${(data.amountPaise / 100).toFixed(2)} | UPI: ${data.upiId} | Code: ${code}`
@@ -459,31 +468,16 @@ export async function createLoginOtp(data: {
     g.__kamai_login_otps?.set(norm.cleanDigits, pending);
   }
 
-  // Attempt Supabase Auth signInWithOtp if configured
-  if (isSupabaseConfigured()) {
+  // Send real transactional email via Brevo & Supabase
+  if (norm.type === "email") {
     try {
-      const supabase = await createSupabaseServer();
-      if (norm.type === "email") {
-        await supabase.auth.signInWithOtp({
-          email: key,
-          options: {
-            shouldCreateUser: true,
-          },
-        });
-      } else {
-        await supabase.auth.signInWithOtp({
-          phone: key,
-          options: {
-            shouldCreateUser: true,
-          },
-        });
-      }
-    } catch (err: any) {
-      // Gracefully handle Supabase rate-limits or missing SMS/Email credentials
-      console.warn(
-        "Supabase Auth signInWithOtp notice (falling back to application OTP):",
-        err?.message || err
-      );
+      await sendOtpEmail({
+        toEmail: key,
+        otpCode: code,
+        type: "login",
+      });
+    } catch (emailErr: any) {
+      console.warn("sendOtpEmail login delivery notice:", emailErr?.message || emailErr);
     }
   }
 

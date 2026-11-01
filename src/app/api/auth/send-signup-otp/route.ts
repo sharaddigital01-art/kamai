@@ -4,16 +4,15 @@ import { prisma } from "@/lib/prisma";
 import {
   isDatabaseConfigured,
   findMockUserByEmail,
-  findMockUserByPhone,
 } from "@/lib/mockData";
-import { validateIndianPhone, createSignupOtp } from "@/lib/otp";
+import { createSignupOtp } from "@/lib/otp";
 
 export const runtime = "nodejs";
 
 const RequestSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(100),
   email: z.string().trim().email("Please enter a valid email address").toLowerCase(),
-  phone: z.string().trim().min(10, "Please enter a valid 10-digit mobile number"),
+  phone: z.string().trim().optional(),
   password: z.string().min(6, "Password must be at least 6 characters"),
   referralCode: z.string().trim().optional(),
 });
@@ -31,33 +30,16 @@ export async function POST(req: Request) {
 
     const { name, email, phone, password, referralCode } = result.data;
 
-    // Validate 10-digit Indian mobile number
-    const phoneCheck = validateIndianPhone(phone);
-    if (!phoneCheck.valid) {
-      return NextResponse.json(
-        { error: phoneCheck.error || "Please enter a valid 10-digit Indian mobile number." },
-        { status: 400 }
-      );
-    }
-    const formattedPhone = phoneCheck.formatted; // "+91" + 10 digits
-
-    // 1. Check if an account already exists with this email or phone
+    // 1. Check if an account already exists with this email
     if (isDatabaseConfigured()) {
       try {
         const existing = await prisma.user.findFirst({
-          where: {
-            OR: [
-              { email },
-              { phone: formattedPhone },
-              { phone: phoneCheck.cleanDigits },
-            ],
-          },
+          where: { email },
         });
 
         if (existing) {
-          const duplicateField = existing.email === email ? "email" : "mobile number";
           return NextResponse.json(
-            { error: `An account with this ${duplicateField} already exists. Please log in.` },
+            { error: "An account with this email address already exists. Please log in." },
             { status: 409 }
           );
         }
@@ -70,23 +52,16 @@ export async function POST(req: Request) {
     const existingMockEmail = findMockUserByEmail(email);
     if (existingMockEmail) {
       return NextResponse.json(
-        { error: "An account with this email already exists. Please log in." },
-        { status: 409 }
-      );
-    }
-    const existingMockPhone = findMockUserByPhone(phoneCheck.cleanDigits);
-    if (existingMockPhone) {
-      return NextResponse.json(
-        { error: "An account with this mobile number already exists. Please log in." },
+        { error: "An account with this email address already exists. Please log in." },
         { status: 409 }
       );
     }
 
-    // 2. Generate and store OTP
+    // 2. Generate and store OTP, triggering transactional email via Brevo / Supabase
     const otpResult = await createSignupOtp({
       name,
       email,
-      phone: formattedPhone,
+      phone: phone?.trim() || undefined,
       password,
       referralCode,
     });
@@ -100,7 +75,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `A 6-digit verification code has been sent to ${email}.`,
+      message: `A 6-digit verification code has been sent to ${email} via support@kamaikaro.in.`,
       resendAfterSeconds: otpResult.resendAfterSeconds || 60,
       demoOtp: process.env.NODE_ENV !== "production" ? otpResult.code : undefined,
     });

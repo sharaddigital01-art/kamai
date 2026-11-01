@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   X,
   Wallet,
+  Mail,
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
@@ -276,7 +277,7 @@ export function WithdrawModal({
             </span>
             <h2 className="font-display text-base font-extrabold text-ink">
               {step === 1 && "Withdraw to UPI"}
-              {step === 2 && "Confirm with OTP"}
+              {step === 2 && "Confirm with Email OTP"}
               {step === 3 && "Withdrawal Requested"}
             </h2>
           </div>
@@ -405,11 +406,11 @@ export function WithdrawModal({
                 {loading ? (
                   <>
                     <LoaderCircle className="h-4 w-4 animate-spin" />
-                    <span>Sending OTP...</span>
+                    <span>Sending Code to Email...</span>
                   </>
                 ) : (
                   <>
-                    <span>Request Withdrawal OTP</span>
+                    <span>Request Email OTP</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -445,7 +446,8 @@ export function WithdrawModal({
               </div>
 
               <p className="text-center text-xs text-ink-soft">
-                Enter the 6-digit OTP sent to <strong className="text-ink">{userEmail}</strong> to confirm your withdrawal.
+                <Mail className="inline-block h-3.5 w-3.5 text-[#169443] mr-1 -mt-0.5" />
+                Enter the 6-digit confirmation code sent to <strong className="text-ink">{userEmail}</strong> via <em>support@kamaikaro.in</em>.
               </p>
 
               {/* Demo OTP Helper Badge */}
@@ -494,7 +496,7 @@ export function WithdrawModal({
                     Resend code in <strong className="text-ink font-mono">00:{countdown.toString().padStart(2, "0")}</strong>
                   </span>
                 ) : (
-                  <span>Didn&apos;t get the code?</span>
+                  <span>Didn&apos;t get the email?</span>
                 )}
 
                 <button
