@@ -22,6 +22,13 @@ import {
 } from "lucide-react";
 import { formatINR } from "@/lib/money";
 import { BrandLogo } from "@/components/BrandLogo";
+import {
+  getCachedReportsData,
+  setCachedReportsData,
+  getCachedUser,
+  fetchWithSwr,
+  CACHE_KEY_REPORTS,
+} from "@/lib/clientCache";
 
 interface StatsData {
   totalProfitPaise: number;
@@ -54,27 +61,62 @@ export default function ReportsPage() {
     profitPaise: number;
     orders: number;
   } | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  // Instant synchronous state from memory / SWR cache (<100ms / 0ms)
+  const initialCache = getCachedReportsData();
+  const cachedUser = getCachedUser();
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
+    if (initialCache?.authenticated !== undefined) return initialCache.authenticated;
+    if (cachedUser) return cachedUser.authenticated;
+    return null;
+  });
+
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     name?: string | null;
     email?: string | null;
     subId?: string | null;
-  } | null>(null);
-
-  const [stats, setStats] = useState<StatsData>({
-    totalProfitPaise: 0,
-    availablePaise: 0,
-    pendingPaise: 0,
-    paidPaise: 0,
-    inWithdrawalPaise: 0,
-    totalClicks: 0,
-    totalTransactions: 0,
-    convRate: "0.0%",
+  } | null>(() => {
+    if (initialCache?.user) {
+      return {
+        id: initialCache.user.id,
+        name: initialCache.user.name,
+        email: initialCache.user.email,
+        subId: initialCache.activeSubId || initialCache.user.subIdPrefix || null,
+      };
+    }
+    if (cachedUser?.user) {
+      return {
+        id: cachedUser.user.id,
+        name: cachedUser.user.name,
+        email: cachedUser.user.email,
+        subId: cachedUser.user.subIdPrefix || null,
+      };
+    }
+    return null;
   });
 
-  const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
-  const [ledger, setLedger] = useState<any[]>([]);
+  const [stats, setStats] = useState<StatsData>(() => {
+    return initialCache?.stats || {
+      totalProfitPaise: 0,
+      availablePaise: 0,
+      pendingPaise: 0,
+      paidPaise: 0,
+      inWithdrawalPaise: 0,
+      totalClicks: 0,
+      totalTransactions: 0,
+      convRate: "0.0%",
+    };
+  });
+
+  const [dailyStats, setDailyStats] = useState<DailyStat[]>(() => {
+    return Array.isArray(initialCache?.dailyStats) ? initialCache.dailyStats : [];
+  });
+
+  const [ledger, setLedger] = useState<any[]>(() => {
+    return Array.isArray(initialCache?.ledger) ? initialCache.ledger : [];
+  });
+
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
@@ -94,16 +136,47 @@ export default function ReportsPage() {
       const qs = params.toString();
       const url = qs ? `/api/reports?${qs}` : "/api/reports";
 
-      const res = await fetch(url, {
-        cache: "no-store",
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
-          Pragma: "no-cache",
+      // If not forced and we have fresh cache, use SWR fetch
+      const data = await fetchWithSwr(
+        `${CACHE_KEY_REPORTS}_${targetUserId || "self"}`,
+        async () => {
+          const res = await fetch(url, {
+            cache: "no-store",
+            headers: {
+              "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+              Pragma: "no-cache",
+            },
+          });
+          if (!res.ok) throw new Error("Fetch failed");
+          return res.json();
         },
-      });
+        {
+          force: forceBypass,
+          maxAgeMs: 60 * 1000,
+          onBackgroundUpdate: (fresh) => {
+            if (fresh) {
+              setCachedReportsData(fresh);
+              setIsAuthenticated(Boolean(fresh.authenticated));
+              if (fresh.user) {
+                setCurrentUser({
+                  id: fresh.user.id,
+                  name: fresh.user.name,
+                  email: fresh.user.email,
+                  subId: fresh.activeSubId || fresh.user.subIdPrefix || null,
+                });
+              }
+              if (fresh.stats) setStats(fresh.stats);
+              if (fresh.ledger) setLedger(fresh.ledger);
+              if (Array.isArray(fresh.dailyStats) && fresh.dailyStats.length > 0) {
+                setDailyStats(fresh.dailyStats);
+              }
+            }
+          },
+        }
+      );
 
-      if (res.ok) {
-        const data = await res.json();
+      if (data) {
+        setCachedReportsData(data);
         setIsAuthenticated(Boolean(data.authenticated));
         if (data.user) {
           setCurrentUser({
@@ -120,7 +193,9 @@ export default function ReportsPage() {
         }
       }
     } catch {
-      setIsAuthenticated(false);
+      if (!initialCache) {
+        setIsAuthenticated(false);
+      }
     }
   }
 
@@ -279,12 +354,13 @@ export default function ReportsPage() {
             </span>
             <span>You are browsing as guest. Log in to view your personalized click analytics and orders.</span>
           </div>
-          <a
+          <Link
             href="/login?next=/reports"
+            prefetch={true}
             className="shrink-0 rounded-full bg-[#169443] px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-[#13803a] transition"
           >
             Log In
-          </a>
+          </Link>
         </div>
       )}
 

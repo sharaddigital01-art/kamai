@@ -63,7 +63,7 @@ export function QuickPromoTiles() {
             {CardContent}
           </a>
         ) : (
-          <Link key={t.title} href={t.href}>
+          <Link key={t.title} href={t.href} prefetch={true}>
             {CardContent}
           </Link>
         );

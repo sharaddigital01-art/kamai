@@ -24,6 +24,16 @@ import {
   UserPlus,
 } from "lucide-react";
 import { formatINR } from "@/lib/money";
+import {
+  getCachedUser,
+  setCachedUser,
+  getCachedStats,
+  setCachedStats,
+  fetchWithSwr,
+  CACHE_KEY_USER,
+  CACHE_KEY_STATS,
+  invalidateClientCache,
+} from "@/lib/clientCache";
 
 interface HeaderProps {
   totalProfitPaise?: number;
@@ -40,43 +50,82 @@ export function EarnKaroHeader({
   const pathname = usePathname();
   const router = useRouter();
 
-  const [user, setUser] = useState<{ id: string; name: string | null; email: string | null; role: string } | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [liveProfit, setLiveProfit] = useState(initialTotalProfit);
+  // Instant synchronous state initialization from memory/SWR cache (<100ms / 0ms)
+  const [user, setUser] = useState<{ id: string; name: string | null; email: string | null; role: string } | null>(() => {
+    const cached = getCachedUser();
+    return cached?.authenticated && cached.user ? cached.user : null;
+  });
+  const [isAdmin, setIsAdmin] = useState(() => {
+    const cached = getCachedUser();
+    return Boolean(cached?.isAdmin);
+  });
+  const [liveProfit, setLiveProfit] = useState(() => {
+    const cachedStats = getCachedStats();
+    return cachedStats?.balances?.lifetime ?? initialTotalProfit;
+  });
 
   useEffect(() => {
-    async function loadAuth() {
-      try {
-        const [authRes, statsRes] = await Promise.all([
-          fetch("/api/auth/me"),
-          fetch("/api/stats"),
-        ]);
-        if (authRes.ok) {
-          const authData = await authRes.json();
-          if (authData.authenticated && authData.user) {
-            setUser(authData.user);
-            setIsAdmin(Boolean(authData.isAdmin || authData.user.role === "ADMIN"));
+    // SWR fetch: deduped across 60 seconds, returns instant cache and updates in background
+    fetchWithSwr(
+      CACHE_KEY_USER,
+      async () => {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) return { authenticated: false, user: null, isAdmin: false };
+        const data = await res.json();
+        return {
+          authenticated: Boolean(data.authenticated),
+          user: data.user || null,
+          isAdmin: Boolean(data.isAdmin || data.user?.role === "ADMIN"),
+        };
+      },
+      {
+        maxAgeMs: 60 * 1000,
+        onBackgroundUpdate: (fresh) => {
+          if (fresh.authenticated && fresh.user) {
+            setUser(fresh.user);
+            setIsAdmin(fresh.isAdmin);
           } else {
             setUser(null);
             setIsAdmin(false);
           }
-        }
-        if (statsRes.ok) {
-          const statsData = await statsRes.json();
-          if (statsData.balances) {
-            setLiveProfit(statsData.balances.lifetime || 0);
-          }
-        }
-      } catch {
-        //
+        },
       }
-    }
-    loadAuth();
+    ).then((data) => {
+      if (data.authenticated && data.user) {
+        setUser(data.user);
+        setIsAdmin(data.isAdmin);
+      } else {
+        setUser(null);
+        setIsAdmin(false);
+      }
+    }).catch(() => {});
+
+    fetchWithSwr(
+      CACHE_KEY_STATS,
+      async () => {
+        const res = await fetch("/api/stats");
+        if (!res.ok) return null;
+        return res.json();
+      },
+      {
+        maxAgeMs: 60 * 1000,
+        onBackgroundUpdate: (fresh) => {
+          if (fresh?.balances?.lifetime !== undefined) {
+            setLiveProfit(fresh.balances.lifetime);
+          }
+        },
+      }
+    ).then((statsData) => {
+      if (statsData?.balances?.lifetime !== undefined) {
+        setLiveProfit(statsData.balances.lifetime);
+      }
+    }).catch(() => {});
   }, [pathname]);
 
   async function handleLogout() {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
+      invalidateClientCache();
       setUser(null);
       setIsAdmin(false);
       setLiveProfit(0);
@@ -124,7 +173,7 @@ export function EarnKaroHeader({
           </button>
 
           {/* Center: Brand Logo with Leaf Mark */}
-          <Link href="/" className="flex items-center gap-1.5 focus:outline-none">
+          <Link href="/" prefetch={true} className="flex items-center gap-1.5 focus:outline-none">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#1ba34e] text-white shadow-sm ring-1 ring-white/20">
               <svg className="h-4 w-4 fill-white" viewBox="0 0 24 24">
                 <path d="M17 8C8 10 5.9 16.17 3.82 21.34L5.71 22l1-2.3A4.49 4.49 0 0 0 8 20C19 20 22 3 22 3c-1 2-8 2-10 4-4.22 4.22-3.1 9.5-3 10 .3.4.8.7 1.3.7 1.1 0 1.9-.9 1.9-2 0-3 3-5 5-7z" />
@@ -148,6 +197,7 @@ export function EarnKaroHeader({
             </button>
             <Link
               href="/earnings"
+              prefetch={true}
               className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold text-emerald-200 hover:bg-white/20 transition ring-1 ring-white/15"
             >
               <Wallet className="h-3.5 w-3.5 text-[#22c55e]" />
@@ -253,6 +303,7 @@ export function EarnKaroHeader({
                     <p className="num text-lg font-black text-white">{formatINR(liveProfit)}</p>
                     <Link
                       href="/earnings"
+                      prefetch={true}
                       onClick={() => setDrawerOpen(false)}
                       className="text-[11px] font-bold text-[#22c55e] hover:underline"
                     >
@@ -264,6 +315,7 @@ export function EarnKaroHeader({
                 <div className="mt-4 flex gap-2">
                   <Link
                     href="/login"
+                    prefetch={true}
                     onClick={() => setDrawerOpen(false)}
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-[#22c55e] py-2 text-xs font-bold text-ink shadow-sm"
                   >
@@ -272,6 +324,7 @@ export function EarnKaroHeader({
                   </Link>
                   <Link
                     href="/signup"
+                    prefetch={true}
                     onClick={() => setDrawerOpen(false)}
                     className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-white/20 py-2 text-xs font-bold text-white ring-1 ring-white/25"
                   >
@@ -291,6 +344,7 @@ export function EarnKaroHeader({
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={true}
                     onClick={() => setDrawerOpen(false)}
                     className={`flex items-center justify-between rounded-xl px-3.5 py-2.5 font-medium transition ${
                       active

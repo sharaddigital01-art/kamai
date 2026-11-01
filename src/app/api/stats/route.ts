@@ -105,15 +105,110 @@ export async function GET(req: Request) {
 
   if (isDatabaseConfigured()) {
     try {
-      // 1. Query non-admin transactions from earningsLedger
-      const userRows = await prisma.earningsLedger.findMany({
-        where: {
-          userId: user.id,
-          externalItemId: { not: "platform-cut" },
-        },
-        include: { store: { select: { name: true, slug: true } } },
-        orderBy: { createdAt: "desc" },
-      });
+      const userPrefix = (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
+      const userSubIds = [
+        userPrefix,
+        `${userPrefix}_tg`,
+        `${userPrefix}_web`,
+        `${userPrefix}_link`,
+        user.id,
+        user.referralCode,
+      ].filter(Boolean);
+
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+      sevenDaysAgo.setHours(0, 0, 0, 0);
+
+      const clickWhere = {
+        OR: [
+          { userId: user.id },
+          { subId: { in: userSubIds } },
+          { subId: { startsWith: userPrefix } },
+        ],
+      };
+
+      // Execute all 8 queries concurrently in parallel with specific column projections
+      const [
+        userRows,
+        locked,
+        userWithdrawals,
+        clicksCount,
+        shortAgg,
+        genAgg,
+        userConversions,
+        recentClicks,
+      ] = await Promise.all([
+        prisma.earningsLedger.findMany({
+          where: {
+            userId: user.id,
+            externalItemId: { not: "platform-cut" },
+          },
+          select: {
+            id: true,
+            externalOrderId: true,
+            orderAmountPaise: true,
+            userAmountPaise: true,
+            status: true,
+            createdAt: true,
+            store: { select: { name: true, slug: true } },
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.withdrawal.aggregate({
+          where: { userId: user.id, status: { in: ["REQUESTED", "PROCESSING"] } },
+          _sum: { amountPaise: true },
+        }),
+        prisma.withdrawal.findMany({
+          where: { userId: user.id },
+          select: {
+            id: true,
+            userId: true,
+            amountPaise: true,
+            status: true,
+            method: true,
+            payoutSnapshot: true,
+            requestedAt: true,
+          },
+          orderBy: { requestedAt: "desc" },
+        }),
+        prisma.click.count({ where: clickWhere }),
+        prisma.shortLink.aggregate({
+          where: clickWhere,
+          _sum: { clickCount: true },
+        }),
+        prisma.generatedLink.aggregate({
+          where: clickWhere,
+          _sum: { clickCount: true },
+        }),
+        prisma.conversion.findMany({
+          where: {
+            OR: [
+              { userId: user.id },
+              { subid: userPrefix },
+              { subid: `${userPrefix}_tg` },
+              { subid: { startsWith: userPrefix } },
+            ],
+          },
+          select: {
+            id: true,
+            transactionId: true,
+            storeName: true,
+            saleAmount: true,
+            commission: true,
+            status: true,
+            subid: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.click.findMany({
+          where: {
+            ...clickWhere,
+            createdAt: { gte: sevenDaysAgo },
+          },
+          select: { createdAt: true },
+        }),
+      ]);
 
       ledger = userRows.map((r) => ({
         id: r.id,
@@ -131,19 +226,10 @@ export async function GET(req: Request) {
         else if (row.status === "PAID") balances.paid += row.userAmountPaise;
       }
 
-      const locked = await prisma.withdrawal.aggregate({
-        where: { userId: user.id, status: { in: ["REQUESTED", "PROCESSING"] } },
-        _sum: { amountPaise: true },
-      });
       const inWithdrawal = locked._sum.amountPaise ?? 0;
       balances.inWithdrawal = inWithdrawal;
       balances.available = Math.max(0, balances.available - inWithdrawal);
       balances.lifetime = balances.pending + balances.available + balances.inWithdrawal + balances.paid;
-
-      const userWithdrawals = await prisma.withdrawal.findMany({
-        where: { userId: user.id },
-        orderBy: { requestedAt: "desc" },
-      });
 
       withdrawals = userWithdrawals.map((w) => ({
         id: w.id,
@@ -155,62 +241,10 @@ export async function GET(req: Request) {
         requestedAt: w.requestedAt,
       }));
 
-      // 2. Real Total Clicks = Click rows matching userId OR subId + ShortLink clicks + GeneratedLink clicks
-      const userPrefix = (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
-      const userSubIds = [
-        userPrefix,
-        `${userPrefix}_tg`,
-        `${userPrefix}_web`,
-        `${userPrefix}_link`,
-        user.id,
-        user.referralCode,
-      ].filter(Boolean);
-
-      const clicksCount = await prisma.click.count({
-        where: {
-          OR: [
-            { userId: user.id },
-            { subId: { in: userSubIds } },
-            { subId: { startsWith: userPrefix } },
-          ],
-        },
-      });
-      const shortAgg = await prisma.shortLink.aggregate({
-        where: {
-          OR: [
-            { userId: user.id },
-            { subId: { in: userSubIds } },
-            { subId: { startsWith: userPrefix } },
-          ],
-        },
-        _sum: { clickCount: true },
-      });
-      const genAgg = await prisma.generatedLink.aggregate({
-        where: {
-          OR: [
-            { userId: user.id },
-            { subId: { in: userSubIds } },
-            { subId: { startsWith: userPrefix } },
-          ],
-        },
-        _sum: { clickCount: true },
-      });
+      // Real Total Clicks = Click rows matching userId OR subId + ShortLink clicks + GeneratedLink clicks
       const sumShort = shortAgg._sum.clickCount ?? 0;
       const sumGen = genAgg._sum.clickCount ?? 0;
       totalClicks = Math.max(clicksCount, sumShort + sumGen);
-
-      // 3. User Conversions by userId OR subId
-      const userConversions = await prisma.conversion.findMany({
-        where: {
-          OR: [
-            { userId: user.id },
-            { subid: userPrefix },
-            { subid: `${userPrefix}_tg` },
-            { subid: { startsWith: userPrefix } },
-          ],
-        },
-        orderBy: { createdAt: "desc" },
-      });
 
       conversions = userConversions.map((c) => ({
         id: c.id,
@@ -243,23 +277,6 @@ export async function GET(req: Request) {
         userConversions.length,
         userRows.filter((r) => r.status === "CONFIRMED" || r.status === "PAID").length
       );
-
-      // 4. Daily grouped clicks and profit for chart
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-      sevenDaysAgo.setHours(0, 0, 0, 0);
-
-      const recentClicks = await prisma.click.findMany({
-        where: {
-          OR: [
-            { userId: user.id },
-            { subId: { in: userSubIds } },
-            { subId: { startsWith: userPrefix } },
-          ],
-          createdAt: { gte: sevenDaysAgo },
-        },
-        select: { createdAt: true },
-      });
 
       for (let i = 6; i >= 0; i--) {
         const d = new Date();

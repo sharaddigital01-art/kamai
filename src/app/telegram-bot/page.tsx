@@ -25,6 +25,16 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
+import {
+  getCachedUser,
+  setCachedUser,
+  getCachedTelegramConfig,
+  setCachedTelegramConfig,
+  fetchWithSwr,
+  invalidateClientCache,
+  CACHE_KEY_USER,
+  CACHE_KEY_TELEGRAM_CONFIG,
+} from "@/lib/clientCache";
 
 interface UserProfile {
   id: string;
@@ -48,22 +58,37 @@ interface TelegramConfig {
   isActive: boolean;
 }
 
-export default function TelegramBotPage() {
-  const [authLoading, setAuthLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
+function TelegramSkeleton() {
+  return (
+    <div className="space-y-6 pt-2 pb-20 max-w-xl mx-auto px-3 sm:px-4 animate-pulse">
+      <div className="h-44 rounded-3xl bg-neutral-200 dark:bg-neutral-800" />
+      <div className="h-64 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
+      <div className="h-56 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
+    </div>
+  );
+}
 
-  const [connected, setConnected] = useState(false);
-  const [config, setConfig] = useState<TelegramConfig>({
-    telegramUserId: null,
-    telegramUsername: null,
-    sessionString: null,
-    targetChannelId: "",
-    targetChannelName: "",
-    amazonTag: "",
-    targetChannels: [],
-    sourceChannels: [],
-    isActive: true,
-  });
+export default function TelegramBotPage() {
+  const cachedUser = typeof window !== "undefined" ? getCachedUser() : null;
+  const cachedTg = typeof window !== "undefined" ? getCachedTelegramConfig() : null;
+
+  const [authLoading, setAuthLoading] = useState<boolean>(!cachedUser && !cachedTg);
+  const [user, setUser] = useState<UserProfile | null>((cachedUser?.user as any) || null);
+
+  const [connected, setConnected] = useState<boolean>(cachedTg?.connected ?? false);
+  const [config, setConfig] = useState<TelegramConfig>(
+    cachedTg?.config ?? {
+      telegramUserId: null,
+      telegramUsername: null,
+      sessionString: null,
+      targetChannelId: "",
+      targetChannelName: "",
+      amazonTag: "",
+      targetChannels: [],
+      sourceChannels: [],
+      isActive: true,
+    }
+  );
 
   const [presetChannels, setPresetChannels] = useState<string[]>([
     "@lootdealsindia",
@@ -83,77 +108,121 @@ export default function TelegramBotPage() {
 
   const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME || "kamaikaro_bot";
 
-  async function loadData() {
+  function applyTelegramConfig(cfgData: any) {
+    if (!cfgData) return;
+
+    // Strictly check if a valid Telegram session or telegram user ID exists
+    const isUserConnected = Boolean(
+      (cfgData.sessionString && String(cfgData.sessionString).trim() !== "") ||
+      (cfgData.telegramUserId && String(cfgData.telegramUserId).trim() !== "")
+    );
+    setConnected(isUserConnected);
+
+    // Format source channels cleanly (supports both strings and JSON objects from Telegram dialogs)
+    let rawSource = cfgData.sourceChannels || [];
+    if (!Array.isArray(rawSource)) rawSource = [];
+    const formattedSource = rawSource
+      .map((c: any) => {
+        if (typeof c === "string") return c;
+        if (!c) return "";
+        if (c.username) return `@${c.username.replace(/^@/, "")}`;
+        if (c.title) return c.title;
+        if (c.id) return String(c.id);
+        return "";
+      })
+      .filter(Boolean);
+
+    // Extract target channel if stored in targetChannels or direct fields
+    let targetId = cfgData.targetChannelId || "";
+    let targetName = cfgData.targetChannelName || "";
+    if (!targetId && Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0) {
+      const firstTgt = cfgData.targetChannels[0];
+      if (typeof firstTgt === "string") {
+        targetId = firstTgt;
+        targetName = firstTgt;
+      } else if (firstTgt && typeof firstTgt === "object") {
+        targetId = firstTgt.username
+          ? `@${firstTgt.username.replace(/^@/, "")}`
+          : String(firstTgt.id || "");
+        targetName = firstTgt.title || targetId;
+      }
+    }
+
+    const newConfig: TelegramConfig = {
+      telegramUserId: cfgData.telegramUserId || null,
+      telegramUsername: cfgData.telegramUsername || null,
+      sessionString: cfgData.sessionString || null,
+      targetChannelId: targetId,
+      targetChannelName: targetName,
+      amazonTag: cfgData.amazonTag || "",
+      targetChannels: cfgData.targetChannels || [],
+      sourceChannels: formattedSource,
+      isActive: cfgData.isActive !== undefined ? cfgData.isActive : true,
+    };
+
+    setConfig(newConfig);
+    setCachedTelegramConfig({
+      connected: isUserConnected,
+      config: newConfig,
+    });
+
+    if (cfgData.defaultSourceChannels) {
+      setPresetChannels(cfgData.defaultSourceChannels);
+    }
+  }
+
+  async function loadData(force = false) {
     try {
-      const authRes = await fetch("/api/auth/me", { cache: "no-store" });
-      if (authRes.ok) {
-        const authData = await authRes.json();
-        if (authData.authenticated && authData.user) {
-          setUser(authData.user);
-
-          // Fetch telegram config for this user with cache: 'no-store'
-          const cfgRes = await fetch(`/api/telegram/user-config?userId=${encodeURIComponent(authData.user.id)}`, {
-            cache: "no-store",
-          });
-          if (cfgRes.ok) {
-            const cfgData = await cfgRes.json();
-
-            // Strictly check if a valid Telegram session or telegram user ID exists
-            const isUserConnected = Boolean(
-              (cfgData.sessionString && String(cfgData.sessionString).trim() !== "") ||
-              (cfgData.telegramUserId && String(cfgData.telegramUserId).trim() !== "")
-            );
-            setConnected(isUserConnected);
-
-            // Format source channels cleanly (supports both strings and JSON objects from Telegram dialogs)
-            let rawSource = cfgData.sourceChannels || [];
-            if (!Array.isArray(rawSource)) rawSource = [];
-            const formattedSource = rawSource
-              .map((c: any) => {
-                if (typeof c === "string") return c;
-                if (!c) return "";
-                if (c.username) return `@${c.username.replace(/^@/, "")}`;
-                if (c.title) return c.title;
-                if (c.id) return String(c.id);
-                return "";
-              })
-              .filter(Boolean);
-
-            // Extract target channel if stored in targetChannels or direct fields
-            let targetId = cfgData.targetChannelId || "";
-            let targetName = cfgData.targetChannelName || "";
-            if (!targetId && Array.isArray(cfgData.targetChannels) && cfgData.targetChannels.length > 0) {
-              const firstTgt = cfgData.targetChannels[0];
-              if (typeof firstTgt === "string") {
-                targetId = firstTgt;
-                targetName = firstTgt;
-              } else if (firstTgt && typeof firstTgt === "object") {
-                targetId = firstTgt.username
-                  ? `@${firstTgt.username.replace(/^@/, "")}`
-                  : String(firstTgt.id || "");
-                targetName = firstTgt.title || targetId;
-              }
+      const authData = await fetchWithSwr<{ authenticated: boolean; user: any; isAdmin?: boolean }>(
+        CACHE_KEY_USER,
+        async () => {
+          const authRes = await fetch("/api/auth/me", { cache: "no-store" });
+          if (!authRes.ok) throw new Error("Auth failed");
+          return authRes.json();
+        },
+        {
+          force,
+          maxAgeMs: 60000,
+          onBackgroundUpdate: (fresh) => {
+            if (fresh?.authenticated && fresh?.user) {
+              setUser(fresh.user);
+              setCachedUser(fresh as any);
+            } else {
+              setUser(null);
             }
-
-            setConfig({
-              telegramUserId: cfgData.telegramUserId || null,
-              telegramUsername: cfgData.telegramUsername || null,
-              sessionString: cfgData.sessionString || null,
-              targetChannelId: targetId,
-              targetChannelName: targetName,
-              amazonTag: cfgData.amazonTag || "",
-              targetChannels: cfgData.targetChannels || [],
-              sourceChannels: formattedSource,
-              isActive: cfgData.isActive !== undefined ? cfgData.isActive : true,
-            });
-
-            if (cfgData.defaultSourceChannels) {
-              setPresetChannels(cfgData.defaultSourceChannels);
-            }
-          }
-        } else {
-          setUser(null);
+          },
         }
+      );
+
+      if (authData?.authenticated && authData?.user) {
+        setUser(authData.user);
+        setCachedUser(authData as any);
+        const userId = authData.user.id;
+
+        // Fetch telegram config for this user with SWR
+        const cfgData = await fetchWithSwr<any>(
+          `${CACHE_KEY_TELEGRAM_CONFIG}_${userId}`,
+          async () => {
+            const cfgRes = await fetch(`/api/telegram/user-config?userId=${encodeURIComponent(userId)}`, {
+              cache: "no-store",
+            });
+            if (!cfgRes.ok) throw new Error("Failed to load TG config");
+            return cfgRes.json();
+          },
+          {
+            force,
+            maxAgeMs: 60000,
+            onBackgroundUpdate: (freshCfg) => {
+              applyTelegramConfig(freshCfg);
+            },
+          }
+        );
+
+        if (cfgData) {
+          applyTelegramConfig(cfgData);
+        }
+      } else {
+        setUser(null);
       }
     } catch (err) {
       console.warn("Failed to load Telegram bot configuration:", err);
@@ -240,6 +309,7 @@ export default function TelegramBotPage() {
       if (!res.ok) {
         setFeedback({ type: "error", text: data.error || "Failed to save settings." });
       } else {
+        invalidateClientCache(CACHE_KEY_TELEGRAM_CONFIG);
         setFeedback({ type: "success", text: "Settings saved successfully! Bot sync updated." });
         setConnected(true);
         setTimeout(() => setFeedback(null), 4000);
@@ -267,6 +337,7 @@ export default function TelegramBotPage() {
       });
 
       if (res.ok) {
+        invalidateClientCache(CACHE_KEY_TELEGRAM_CONFIG);
         setConnected(false);
         setConfig((prev) => ({
           ...prev,
@@ -302,6 +373,7 @@ export default function TelegramBotPage() {
       });
 
       if (res.ok) {
+        invalidateClientCache(CACHE_KEY_TELEGRAM_CONFIG);
         setConfig((prev) => ({
           ...prev,
           targetChannelId: "",
@@ -321,11 +393,7 @@ export default function TelegramBotPage() {
   }
 
   if (authLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <LoaderCircle className="h-6 w-6 animate-spin text-[#169443]" />
-      </div>
-    );
+    return <TelegramSkeleton />;
   }
 
   // Guest State: prompt to log in or create account first
@@ -391,7 +459,7 @@ export default function TelegramBotPage() {
             type="button"
             onClick={() => {
               setRefreshing(true);
-              loadData();
+              loadData(true);
             }}
             disabled={refreshing}
             className="rounded-full bg-white/20 p-2 text-white hover:bg-white/30 active:scale-95 transition"

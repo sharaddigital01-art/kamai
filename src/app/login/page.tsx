@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Lock,
@@ -18,7 +19,14 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
-import { ForgotPasswordModal } from "@/components/ForgotPasswordModal";
+
+const ForgotPasswordModal = dynamic(
+  () =>
+    import("@/components/ForgotPasswordModal").then(
+      (m) => m.ForgotPasswordModal
+    ),
+  { ssr: false }
+);
 
 function LoginForm() {
   const router = useRouter();

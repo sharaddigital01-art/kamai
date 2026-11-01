@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Link2,
   ClipboardPaste,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { detectStore } from "@/lib/linkConverter";
 import { formatINR } from "@/lib/money";
+import { getCachedUser, fetchWithSwr, CACHE_KEY_USER } from "@/lib/clientCache";
 
 const QUICK_CHIPS = [
   { name: "Flipkart", url: "https://www.flipkart.com/search?q=wireless+earbuds", color: "#2874F0" },
@@ -32,13 +34,17 @@ const QUICK_CHIPS = [
 ];
 
 function MakeLinksContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const initialUrl = searchParams.get("url") || "";
 
   const [inputUrl, setInputUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
+    const cached = getCachedUser();
+    return cached ? cached.authenticated : null;
+  });
   const [result, setResult] = useState<{
     code: string;
     shortUrl: string;
@@ -51,9 +57,26 @@ function MakeLinksContent() {
   const detected = useMemo(() => detectStore(inputUrl), [inputUrl]);
 
   useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => res.json())
-      .then((data) => setIsAuthenticated(Boolean(data.authenticated)))
+    fetchWithSwr(
+      CACHE_KEY_USER,
+      async () => {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) return { authenticated: false, user: null, isAdmin: false };
+        const data = await res.json();
+        return {
+          authenticated: Boolean(data.authenticated),
+          user: data.user || null,
+          isAdmin: Boolean(data.isAdmin || data.user?.role === "ADMIN"),
+        };
+      },
+      {
+        maxAgeMs: 60 * 1000,
+        onBackgroundUpdate: (fresh) => {
+          setIsAuthenticated(fresh.authenticated);
+        },
+      }
+    )
+      .then((data) => setIsAuthenticated(data.authenticated))
       .catch(() => setIsAuthenticated(false));
   }, []);
 
@@ -77,7 +100,7 @@ function MakeLinksContent() {
     if (!inputUrl.trim()) return;
 
     if (isAuthenticated === false) {
-      window.location.href = `/login?next=${encodeURIComponent("/make-links?url=" + encodeURIComponent(inputUrl.trim()))}`;
+      router.push(`/login?next=${encodeURIComponent("/make-links?url=" + encodeURIComponent(inputUrl.trim()))}`);
       return;
     }
 
@@ -133,12 +156,13 @@ function MakeLinksContent() {
             </span>
             <span>You are currently browsing as guest. Log in to track earnings to your account.</span>
           </div>
-          <a
+          <Link
             href="/login?next=/make-links"
+            prefetch={true}
             className="shrink-0 rounded-full bg-[#169443] px-3.5 py-1.5 font-bold text-white shadow-sm hover:bg-[#13803a] transition"
           >
             Log In
-          </a>
+          </Link>
         </div>
       )}
 

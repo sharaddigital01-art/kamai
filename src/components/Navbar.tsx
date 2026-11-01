@@ -7,7 +7,7 @@ import { useMakeLink } from "@/store/makeLink";
 
 export function Logo() {
   return (
-    <Link href="/" className="flex items-center gap-2 font-display text-xl font-extrabold tracking-tight" aria-label="Kamai home">
+    <Link href="/" prefetch={true} className="flex items-center gap-2 font-display text-xl font-extrabold tracking-tight" aria-label="Kamai home">
       <span className="grid h-8 w-8 place-items-center rounded-lg bg-leaf-600 text-base text-white" aria-hidden>
         ₹
       </span>
@@ -47,13 +47,14 @@ export function Navbar({ signedIn, availablePaise }: { signedIn: boolean; availa
           {signedIn ? (
             <Link
               href="/earnings"
+              prefetch={true}
               className="num inline-flex items-center gap-2 rounded-full bg-leaf-50 px-3.5 py-2.5 text-sm font-semibold text-leaf-700 ring-1 ring-leaf-100 hover:bg-leaf-100"
             >
               <Wallet className="h-4 w-4" aria-hidden />
               {availablePaise === null ? "Earnings" : formatINR(availablePaise)}
             </Link>
           ) : (
-            <Link href="/login" className="rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white hover:bg-ink-soft">
+            <Link href="/login" prefetch={true} className="rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-white hover:bg-ink-soft">
               Log in
             </Link>
           )}

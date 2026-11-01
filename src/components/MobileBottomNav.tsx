@@ -19,6 +19,7 @@ function Item({ href, label, Icon, active }: { href: string; label: string; Icon
   return (
     <Link
       href={href}
+      prefetch={true}
       aria-current={active ? "page" : undefined}
       className={clsx("flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-medium", active ? "text-ink" : "text-ink-faint")}
     >

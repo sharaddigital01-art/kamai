@@ -2,10 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Wallet, ShieldCheck } from "lucide-react";
 import { MIN_WITHDRAWAL_PAISE } from "@/lib/constants";
 import { formatINR } from "@/lib/money";
-import { WithdrawModal } from "./WithdrawModal";
+
+const WithdrawModal = dynamic(
+  () => import("./WithdrawModal").then((m) => m.WithdrawModal),
+  { ssr: false }
+);
 
 interface WithdrawButtonProps {
   availablePaise: number;

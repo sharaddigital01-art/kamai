@@ -23,6 +23,7 @@ export function EarnKaroBottomNav() {
         {/* 1. Home */}
         <Link
           href="/"
+          prefetch={true}
           className={clsx(
             "flex flex-1 flex-col items-center justify-center py-1 transition-colors select-none",
             isHome ? "text-[#134024] font-bold" : "text-ink-soft hover:text-ink font-medium"
@@ -36,6 +37,7 @@ export function EarnKaroBottomNav() {
         {/* 2. Our Partners */}
         <Link
           href="/partners"
+          prefetch={true}
           className={clsx(
             "flex flex-1 flex-col items-center justify-center py-1 transition-colors select-none",
             isPartners ? "text-[#134024] font-bold" : "text-ink-soft hover:text-ink font-medium"
@@ -50,6 +52,7 @@ export function EarnKaroBottomNav() {
         <div className="relative flex flex-1 flex-col items-center justify-center">
           <Link
             href="/make-links"
+            prefetch={true}
             aria-label="Make Links"
             className={clsx(
               "-mt-6 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-tr from-[#134024] to-[#1ba34e] text-white shadow-[0_8px_16px_rgba(27,163,78,0.35)] ring-4 ring-white transition transform active:scale-90 hover:scale-105",
@@ -71,6 +74,7 @@ export function EarnKaroBottomNav() {
         {/* 4. Reports */}
         <Link
           href="/reports"
+          prefetch={true}
           className={clsx(
             "flex flex-1 flex-col items-center justify-center py-1 transition-colors select-none",
             isReports ? "text-[#134024] font-bold" : "text-ink-soft hover:text-ink font-medium"
@@ -84,6 +88,7 @@ export function EarnKaroBottomNav() {
         {/* 5. Profile */}
         <Link
           href="/profile"
+          prefetch={true}
           className={clsx(
             "flex flex-1 flex-col items-center justify-center py-1 transition-colors select-none",
             isProfile ? "text-[#134024] font-bold" : "text-ink-soft hover:text-ink font-medium"

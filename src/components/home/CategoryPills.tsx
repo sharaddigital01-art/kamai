@@ -34,6 +34,7 @@ export function CategoryPills() {
             <Link
               key={cat.label}
               href={href}
+              prefetch={true}
               className={clsx(
                 "rounded-full px-3.5 py-1.5 text-xs font-semibold whitespace-nowrap transition-all shadow-sm active:scale-95",
                 isActive

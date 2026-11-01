@@ -66,7 +66,25 @@ export async function GET(req: Request) {
         try {
           const dbConfigs = await prisma.telegramChannelConfig.findMany({
             where: activeOnly ? { isActive: true } : undefined,
-            include: { user: true },
+            select: {
+              id: true,
+              userId: true,
+              telegramUserId: true,
+              sessionString: true,
+              sourceChannels: true,
+              targetChannels: true,
+              targetChannelId: true,
+              targetChannelName: true,
+              amazonTag: true,
+              isActive: true,
+              user: {
+                select: {
+                  id: true,
+                  subIdPrefix: true,
+                  referralCode: true,
+                },
+              },
+            },
           });
 
           for (const item of dbConfigs) {
@@ -137,6 +155,34 @@ export async function GET(req: Request) {
     }
 
     // 3. Single User Lookup: queryUserId OR queryTelegramId OR logged-in session user
+    const userSelectFields = {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        subIdPrefix: true,
+        referralCode: true,
+      },
+    };
+
+    const configSelectFields = {
+      select: {
+        id: true,
+        userId: true,
+        telegramUserId: true,
+        telegramUsername: true,
+        sessionString: true,
+        sourceChannels: true,
+        targetChannels: true,
+        targetChannelId: true,
+        targetChannelName: true,
+        amazonTag: true,
+        isActive: true,
+        user: userSelectFields,
+      },
+    };
+
     let user: any = null;
     let config: any = null;
     let targetUserId = queryUserId;
@@ -146,12 +192,15 @@ export async function GET(req: Request) {
         try {
           config = await prisma.telegramChannelConfig.findUnique({
             where: { userId: queryUserId },
-            include: { user: true },
+            ...configSelectFields,
           });
           if (config?.user) {
             user = config.user;
           } else {
-            user = await prisma.user.findUnique({ where: { id: queryUserId } });
+            user = await prisma.user.findUnique({
+              where: { id: queryUserId },
+              ...userSelectFields,
+            });
           }
         } catch (dbErr) {
           console.warn("DB lookup fallback in user-config by userId:", dbErr);
@@ -172,7 +221,7 @@ export async function GET(req: Request) {
         try {
           config = await prisma.telegramChannelConfig.findFirst({
             where: { telegramUserId: queryTelegramId },
-            include: { user: true },
+            ...configSelectFields,
           });
           if (config?.user) {
             user = config.user;
@@ -197,7 +246,7 @@ export async function GET(req: Request) {
           try {
             config = await prisma.telegramChannelConfig.findUnique({
               where: { userId: queryUserId },
-              include: { user: true },
+              ...configSelectFields,
             });
             if (config) {
               user = config.user;
@@ -209,11 +258,14 @@ export async function GET(req: Request) {
                     isActive: true,
                     updatedAt: new Date(),
                   },
-                  include: { user: true },
+                  ...configSelectFields,
                 });
               }
             } else {
-              const u = await prisma.user.findUnique({ where: { id: queryUserId } });
+              const u = await prisma.user.findUnique({
+                where: { id: queryUserId },
+                ...userSelectFields,
+              });
               if (u) {
                 user = u;
                 config = await prisma.telegramChannelConfig.create({
@@ -222,7 +274,7 @@ export async function GET(req: Request) {
                     telegramUserId: queryTelegramId,
                     isActive: true,
                   },
-                  include: { user: true },
+                  ...configSelectFields,
                 });
               }
             }
@@ -257,12 +309,15 @@ export async function GET(req: Request) {
           try {
             config = await prisma.telegramChannelConfig.findUnique({
               where: { userId: targetUserId },
-              include: { user: true },
+              ...configSelectFields,
             });
             if (config?.user) {
               user = config.user;
             } else {
-              user = await prisma.user.findUnique({ where: { id: targetUserId } });
+              user = await prisma.user.findUnique({
+                where: { id: targetUserId },
+                ...userSelectFields,
+              });
             }
           } catch (dbErr) {
             console.warn("DB lookup fallback in user-config by targetUserId:", dbErr);
@@ -511,6 +566,11 @@ export async function POST(req: Request) {
       try {
         userRecord = await prisma.user.findUnique({
           where: { id: targetUserId },
+          select: {
+            id: true,
+            subIdPrefix: true,
+            referralCode: true,
+          },
         });
       } catch (dbErr) {
         console.warn("DB user fetch error in POST user-config:", dbErr);

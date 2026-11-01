@@ -310,6 +310,7 @@ export default function PartnersPage() {
             <div className="mt-4 pt-2.5 border-t border-black/5">
               <Link
                 href={`/make-links?url=${encodeURIComponent(brand.sampleUrl)}`}
+                prefetch={true}
                 className="flex w-full items-center justify-center gap-1 rounded-full bg-[#134024] py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#169443] active:scale-95"
               >
                 Make Link <ArrowUpRight className="h-3.5 w-3.5" />

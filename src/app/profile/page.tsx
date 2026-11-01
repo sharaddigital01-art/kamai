@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   Wallet,
@@ -29,8 +30,27 @@ import {
   KeyRound,
 } from "lucide-react";
 import { formatINR } from "@/lib/money";
-import { WithdrawModal } from "@/components/WithdrawModal";
-import { ChangePasswordModal } from "@/components/ChangePasswordModal";
+import {
+  getCachedUser,
+  setCachedUser,
+  getCachedStats,
+  setCachedStats,
+  fetchWithSwr,
+  CACHE_KEY_USER,
+  CACHE_KEY_STATS,
+  invalidateClientCache,
+} from "@/lib/clientCache";
+
+// Dynamic import heavy modal components to keep initial route bundle ultra-lightweight
+const WithdrawModal = dynamic(
+  () => import("@/components/WithdrawModal").then((m) => m.WithdrawModal),
+  { ssr: false }
+);
+
+const ChangePasswordModal = dynamic(
+  () => import("@/components/ChangePasswordModal").then((m) => m.ChangePasswordModal),
+  { ssr: false }
+);
 
 interface AuthUserData {
   id: string;
@@ -40,35 +60,61 @@ interface AuthUserData {
   referralCode: string;
 }
 
+function ProfileSkeleton() {
+  return (
+    <div className="space-y-6 pt-4 pb-16 max-w-xl mx-auto px-4 animate-pulse">
+      <div className="rounded-3xl bg-neutral-200/80 h-44 shadow-sm" />
+      <div className="rounded-2xl bg-neutral-100 h-28" />
+      <div className="space-y-3 pt-2">
+        <div className="rounded-2xl bg-neutral-100 h-14" />
+        <div className="rounded-2xl bg-neutral-100 h-14" />
+        <div className="rounded-2xl bg-neutral-100 h-14" />
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const [copiedId, setCopiedId] = useState(false);
   const [copiedRef, setCopiedRef] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [user, setUser] = useState<AuthUserData | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Synchronous 0ms state from memory/SWR cache
+  const cachedUser = getCachedUser();
+  const cachedStats = getCachedStats();
+
+  const [authLoading, setAuthLoading] = useState(() => !cachedUser);
+  const [user, setUser] = useState<AuthUserData | null>(() => {
+    return cachedUser?.authenticated && cachedUser.user ? (cachedUser.user as AuthUserData) : null;
+  });
+  const [isAdmin, setIsAdmin] = useState(() => Boolean(cachedUser?.isAdmin));
   const [loggingOut, setLoggingOut] = useState(false);
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
-  const [balances, setBalances] = useState({
-    lifetime: 0,
-    available: 0,
-    pending: 0,
-  });
+  const [balances, setBalances] = useState(() => ({
+    lifetime: cachedStats?.balances?.lifetime || 0,
+    available: cachedStats?.balances?.available || 0,
+    pending: cachedStats?.balances?.pending || 0,
+  }));
 
   async function refreshStats() {
     try {
-      const statsRes = await fetch("/api/stats");
-      if (statsRes.ok) {
-        const statsData = await statsRes.json();
-        if (statsData.balances) {
-          setBalances({
-            lifetime: statsData.balances.lifetime || 0,
-            available: statsData.balances.available || 0,
-            pending: statsData.balances.pending || 0,
-          });
-        }
+      const statsData = await fetchWithSwr(
+        CACHE_KEY_STATS,
+        async () => {
+          const res = await fetch("/api/stats");
+          if (!res.ok) throw new Error("Stats fetch failed");
+          return res.json();
+        },
+        { force: true }
+      );
+      if (statsData?.balances) {
+        setBalances({
+          lifetime: statsData.balances.lifetime || 0,
+          available: statsData.balances.available || 0,
+          pending: statsData.balances.pending || 0,
+        });
       }
     } catch {
       //
@@ -78,31 +124,69 @@ export default function ProfilePage() {
   useEffect(() => {
     async function init() {
       try {
-        const [authRes, statsRes] = await Promise.all([
-          fetch("/api/auth/me"),
-          fetch("/api/stats"),
-        ]);
-
-        if (authRes.ok) {
-          const authData = await authRes.json();
-          if (authData.authenticated && authData.user) {
-            setUser(authData.user);
-            setIsAdmin(Boolean(authData.isAdmin || authData.user.role === "ADMIN"));
-          } else {
-            setUser(null);
-            setIsAdmin(false);
+        const userPromise = fetchWithSwr(
+          CACHE_KEY_USER,
+          async () => {
+            const authRes = await fetch("/api/auth/me");
+            if (!authRes.ok) return { authenticated: false, user: null, isAdmin: false };
+            const authData = await authRes.json();
+            return {
+              authenticated: Boolean(authData.authenticated),
+              user: authData.user || null,
+              isAdmin: Boolean(authData.isAdmin || authData.user?.role === "ADMIN"),
+            };
+          },
+          {
+            maxAgeMs: 60 * 1000,
+            onBackgroundUpdate: (fresh) => {
+              if (fresh.authenticated && fresh.user) {
+                setUser(fresh.user as AuthUserData);
+                setIsAdmin(fresh.isAdmin);
+              } else {
+                setUser(null);
+                setIsAdmin(false);
+              }
+            },
           }
+        );
+
+        const statsPromise = fetchWithSwr(
+          CACHE_KEY_STATS,
+          async () => {
+            const statsRes = await fetch("/api/stats");
+            if (!statsRes.ok) return null;
+            return statsRes.json();
+          },
+          {
+            maxAgeMs: 60 * 1000,
+            onBackgroundUpdate: (fresh) => {
+              if (fresh?.balances) {
+                setBalances({
+                  lifetime: fresh.balances.lifetime || 0,
+                  available: fresh.balances.available || 0,
+                  pending: fresh.balances.pending || 0,
+                });
+              }
+            },
+          }
+        );
+
+        const [authData, statsData] = await Promise.all([userPromise, statsPromise]);
+
+        if (authData?.authenticated && authData.user) {
+          setUser(authData.user as AuthUserData);
+          setIsAdmin(authData.isAdmin);
+        } else {
+          setUser(null);
+          setIsAdmin(false);
         }
 
-        if (statsRes.ok) {
-          const statsData = await statsRes.json();
-          if (statsData.balances) {
-            setBalances({
-              lifetime: statsData.balances.lifetime || 0,
-              available: statsData.balances.available || 0,
-              pending: statsData.balances.pending || 0,
-            });
-          }
+        if (statsData?.balances) {
+          setBalances({
+            lifetime: statsData.balances.lifetime || 0,
+            available: statsData.balances.available || 0,
+            pending: statsData.balances.pending || 0,
+          });
         }
       } catch {
         // Fallback
@@ -118,6 +202,7 @@ export default function ProfilePage() {
     setLoggingOut(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
+      invalidateClientCache();
       setUser(null);
       setIsAdmin(false);
       router.push("/login");
@@ -143,12 +228,8 @@ export default function ProfilePage() {
     setTimeout(() => setCopiedRef(false), 2000);
   }
 
-  if (authLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <LoaderCircle className="h-6 w-6 animate-spin text-[#169443]" />
-      </div>
-    );
+  if (authLoading && !user) {
+    return <ProfileSkeleton />;
   }
 
   // Guest State: Prompt to Log In or Sign Up
