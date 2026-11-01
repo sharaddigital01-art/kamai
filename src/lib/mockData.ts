@@ -548,7 +548,7 @@ if (!g.mockUsers) {
   g.mockUsers.set("admin@earnkaro.com", {
     id: "00000000-0000-0000-0000-000000000002",
     email: "admin@earnkaro.com",
-    name: "EarnKaro Admin",
+    name: "Kamai Karo Admin",
     role: "ADMIN",
     referralCode: "EKADMIN",
     subIdPrefix: "ADMIN1",
@@ -929,7 +929,7 @@ export function creditUserBalance(userId: string, amountPaise: number) {
 export function recordWithdrawalRequest(
   amountPaise: number,
   upiId: string,
-  accountHolder = "EarnKaro User",
+  accountHolder = "Kamai Karo User",
   userId = DEMO_USER.id
 ) {
   const balances = getUserBalances(userId);
@@ -1183,7 +1183,7 @@ export const DEFAULT_SOURCE_CHANNELS = [
   "@flipkart_loot_offers",
   "@amazon_great_indian_deals",
   "@fashion_discount_hub",
-  "@earnkaro_hot_deals",
+  "@kamaikaro_hot_deals",
 ];
 
 export function getMockTelegramConfigByUserId(userId: string): MockTelegramChannelConfig | null {

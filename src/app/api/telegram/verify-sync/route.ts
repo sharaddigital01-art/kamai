@@ -62,7 +62,7 @@ export async function POST(req: Request) {
 
     if (!user) {
       return NextResponse.json(
-        { error: `User with ID '${targetUserId}' was not found. Please register or log in on EarnKaro first.` },
+        { error: `User with ID '${targetUserId}' was not found. Please register or log in on Kamai Karo first.` },
         { status: 404 }
       );
     }

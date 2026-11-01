@@ -64,7 +64,7 @@ export const getAuthUser = cache(async () => {
         return {
           id: parsed.id,
           email: parsed.email || null,
-          user_metadata: { name: parsed.name || parsed.email?.split("@")[0] || "EarnKaro Partner" },
+          user_metadata: { name: parsed.name || parsed.email?.split("@")[0] || "Kamai Karo Partner" },
           aud: "authenticated",
           created_at: parsed.createdAt || new Date().toISOString(),
         } as any;
@@ -107,7 +107,7 @@ export async function getOrCreateProfile(auth: {
         };
       }
     }
-    const userName = auth.user_metadata?.name || (auth.email ? auth.email.split("@")[0] : null) || "EarnKaro Partner";
+    const userName = auth.user_metadata?.name || (auth.email ? auth.email.split("@")[0] : null) || "Kamai Karo Partner";
     const newMock = createMockUser({
       id: auth.id,
       email: auth.email || "partner@kamai.local",
@@ -153,7 +153,7 @@ export async function getOrCreateProfile(auth: {
     const userName =
       auth.user_metadata?.name ||
       (auth.email ? auth.email.split("@")[0] : null) ||
-      "EarnKaro Partner";
+      "Kamai Karo Partner";
 
     for (let attempt = 0; attempt < 5; attempt++) {
       try {

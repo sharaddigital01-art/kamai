@@ -19,6 +19,7 @@ const SaveConfigSchema = z.object({
   amazonTag: z.string().trim().optional().nullable(),
   isActive: z.boolean().optional(),
   disconnect: z.boolean().optional(),
+  clearTargetChannel: z.boolean().optional(),
 });
 
 function normalizeChannelTag(tag: string): string {
@@ -50,6 +51,7 @@ export async function POST(req: Request) {
       amazonTag,
       isActive,
       disconnect,
+      clearTargetChannel,
     } = result.data;
 
     // Identify user
@@ -65,7 +67,9 @@ export async function POST(req: Request) {
 
     // Clean targetChannelId
     let cleanTargetChannelId: string | null = null;
-    if (targetChannelId) {
+    if (clearTargetChannel) {
+      cleanTargetChannelId = null;
+    } else if (targetChannelId) {
       cleanTargetChannelId = normalizeChannelTag(targetChannelId);
     }
 
@@ -90,15 +94,32 @@ export async function POST(req: Request) {
         });
 
         if (disconnect) {
-          // Unlink Telegram account while preserving channel settings
-          updatedConfig = await prisma.telegramChannelConfig.update({
-            where: { userId: targetUserId },
-            data: {
-              telegramUserId: null,
-              telegramUsername: null,
-              updatedAt: new Date(),
-            },
-          });
+          // Completely unlink Telegram account: wipe sessionString, telegramUserId, telegramUsername, and deactivate
+          if (existing) {
+            updatedConfig = await prisma.telegramChannelConfig.update({
+              where: { userId: targetUserId },
+              data: {
+                telegramUserId: null,
+                telegramUsername: null,
+                sessionString: null,
+                isActive: false,
+                updatedAt: new Date(),
+              },
+            });
+          }
+        } else if (clearTargetChannel) {
+          // Clear target channel fields
+          if (existing) {
+            updatedConfig = await prisma.telegramChannelConfig.update({
+              where: { userId: targetUserId },
+              data: {
+                targetChannelId: null,
+                targetChannelName: null,
+                targetChannels: [],
+                updatedAt: new Date(),
+              },
+            });
+          }
         } else {
           updatedConfig = await prisma.telegramChannelConfig.upsert({
             where: { userId: targetUserId },
@@ -131,6 +152,15 @@ export async function POST(req: Request) {
           userId: targetUserId,
           telegramUserId: null,
           telegramUsername: null,
+          sessionString: null,
+          isActive: false,
+        });
+      } else if (clearTargetChannel) {
+        updatedConfig = saveMockTelegramConfig({
+          userId: targetUserId,
+          targetChannelId: null,
+          targetChannelName: null,
+          targetChannels: [],
         });
       } else {
         updatedConfig = saveMockTelegramConfig({
@@ -148,7 +178,9 @@ export async function POST(req: Request) {
       success: true,
       message: disconnect
         ? "Telegram bot disconnected successfully."
-        : "Telegram channel automation settings saved successfully!",
+        : clearTargetChannel
+        ? "Target channel removed successfully."
+        : "Telegram configuration saved successfully.",
       config: {
         id: updatedConfig.id,
         userId: updatedConfig.userId,

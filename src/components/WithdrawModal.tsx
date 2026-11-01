@@ -31,7 +31,7 @@ export function WithdrawModal({
   onClose,
   availablePaise,
   userEmail,
-  userName = "EarnKaro Partner",
+  userName = "Kamai Karo Partner",
   defaultUpiId = "",
   onSuccess,
 }: WithdrawModalProps) {

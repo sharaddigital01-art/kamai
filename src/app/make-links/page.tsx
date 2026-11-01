@@ -155,7 +155,7 @@ function MakeLinksContent() {
           Make your own Profit Links in Seconds
         </h1>
         <p className="mt-1 text-xs sm:text-sm text-ink-soft">
-          Paste any Flipkart, Amazon, Myntra or Ajio product link to turn it into an EarnKaro cash link.
+          Paste any Flipkart, Amazon, Myntra or Ajio product link to turn it into a Kamai Karo cash link.
         </p>
 
         {/* Input Form */}

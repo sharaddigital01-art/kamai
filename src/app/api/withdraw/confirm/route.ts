@@ -66,7 +66,7 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    const accountHolder = (pending.accountHolder || user.name || "EarnKaro Partner").trim();
+    const accountHolder = (pending.accountHolder || user.name || "Kamai Karo Partner").trim();
 
     // 2. Double-check available balance
     let availablePaise = 0;

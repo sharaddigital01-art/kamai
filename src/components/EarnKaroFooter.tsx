@@ -63,14 +63,14 @@ export function EarnKaroFooter() {
 
         {/* Accordion Group */}
         <div className="space-y-3">
-          {/* Section 1: ABOUT EARNKARO */}
+          {/* Section 1: ABOUT KAMAI KARO */}
           <div className="rounded-xl bg-white/5 overflow-hidden">
             <button
               type="button"
               onClick={() => toggle("about")}
               className="flex w-full items-center justify-between p-3.5 font-bold tracking-wider text-left text-white hover:bg-white/5 transition"
             >
-              <span>ABOUT EARNKARO</span>
+              <span>ABOUT KAMAI KARO</span>
               {openSections.about ? (
                 <ChevronUp className="h-4 w-4 text-[#22c55e]" />
               ) : (
@@ -80,7 +80,7 @@ export function EarnKaroFooter() {
             {openSections.about && (
               <div className="px-3.5 pb-4 pt-1 text-white/70 space-y-2 border-t border-white/5 leading-relaxed">
                 <p>
-                  EarnKaro is India's leading deal-sharing and affiliate marketing platform. It enables students,
+                  Kamai Karo is India's leading deal-sharing and affiliate marketing platform. It enables students,
                   homemakers, social media influencers, and anyone looking for extra income to earn real cash from
                   home.
                 </p>
@@ -158,7 +158,7 @@ export function EarnKaroFooter() {
                 <p className="text-white/70 mb-3">Join our community for hot daily deals and exclusive bonus codes:</p>
                 <div className="flex flex-wrap gap-2.5">
                   <a
-                    href="https://t.me/earnkaro"
+                    href="https://t.me/kamaikaro_bot"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 rounded-full bg-[#0088cc]/20 text-[#00aaff] px-3 py-1.5 font-semibold hover:bg-[#0088cc]/30 transition"
@@ -209,7 +209,7 @@ export function EarnKaroFooter() {
             {openSections.download && (
               <div className="px-3.5 pb-4 pt-2 border-t border-white/5 space-y-3">
                 <p className="text-white/70">
-                  Earn on the go! Download the EarnKaro App for faster link generation and instant sale alerts:
+                  Earn on the go! Download the Kamai Karo App for faster link generation and instant sale alerts:
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {/* Google Play Badge */}
@@ -251,7 +251,7 @@ export function EarnKaroFooter() {
 
         {/* Footer Bottom / Copyright */}
         <div className="mt-8 border-t border-white/10 pt-4 text-center text-[11px] text-white/50">
-          <p>© 2026 EarnKaro. All rights reserved. Made for smart earners in India.</p>
+          <p>© 2026 Kamai Karo. All rights reserved. Made for smart earners in India.</p>
         </div>
       </div>
     </footer>

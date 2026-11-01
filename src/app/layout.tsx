@@ -10,7 +10,7 @@ import { getBalances } from "@/lib/ledger";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "EarnKaro: Turn Every Share into Real Cash",
+  title: "Kamai Karo: Turn Every Share into Real Cash",
   description: "India's #1 Deal-Sharing App. Share Flipkart, Amazon, Myntra & Ajio deals and earn guaranteed cash directly to your bank account.",
 };
 

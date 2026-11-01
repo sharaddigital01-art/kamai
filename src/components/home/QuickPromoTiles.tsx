@@ -34,7 +34,7 @@ const PROMO_TILES = [
     tag: "Join 200k+ Users",
     icon: Send,
     gradient: "from-sky-500 to-blue-600",
-    href: "https://t.me/earnkaro",
+    href: "https://t.me/kamaikaro_bot",
     external: true,
     textColor: "text-white",
     bgTint: "bg-sky-50",

@@ -297,13 +297,11 @@ export async function GET(req: Request) {
       );
     }
 
-    const isConnected = Boolean(
-      config?.sessionString ||
-      config?.telegramUserId ||
-      config?.isActive ||
-      (config && (config.targetChannelId || (Array.isArray(config.targetChannels) && config.targetChannels.length > 0)))
+    const isTelegramConnected = Boolean(
+      (config?.sessionString && config.sessionString.trim() !== "") ||
+      (config?.telegramUserId && config.telegramUserId.trim() !== "")
     );
-    const isTelegramConnected = Boolean(config?.sessionString || config?.telegramUserId);
+    const isConnected = isTelegramConnected && Boolean(config?.isActive);
     const userTrackingSubId =
       user?.trackingSubId ||
       (user?.subIdPrefix
@@ -312,7 +310,7 @@ export async function GET(req: Request) {
         ? `${config.userId.slice(0, 6)}_tg`
         : targetUserId
         ? `${targetUserId.slice(0, 6)}_tg`
-        : "EK_tg");
+        : "KM_tg");
 
     const sourceChannels =
       config?.sourceChannels && Array.isArray(config.sourceChannels)
@@ -337,13 +335,13 @@ export async function GET(req: Request) {
       amazonTag: config?.amazonTag || null,
       trackingSubId: userTrackingSubId,
       subId: userTrackingSubId,
-      isActive: config?.isActive !== undefined ? config.isActive : true,
+      isActive: isTelegramConnected ? (config?.isActive !== undefined ? config.isActive : true) : false,
     };
 
     return NextResponse.json({
       success: true,
       connected: isConnected,
-      isActive: config?.isActive !== undefined ? config.isActive : true,
+      isActive: isTelegramConnected ? (config?.isActive !== undefined ? config.isActive : true) : false,
       subId: userTrackingSubId,
       trackingSubId: userTrackingSubId,
       targetChannelId: config?.targetChannelId || null,
@@ -441,6 +439,70 @@ export async function POST(req: Request) {
         { error: "Authentication required or unlinked Telegram user ID." },
         { status: 401 }
       );
+    }
+
+    if (json.disconnect) {
+      if (isDatabaseConfigured()) {
+        try {
+          await prisma.telegramChannelConfig.update({
+            where: { userId: targetUserId },
+            data: {
+              telegramUserId: null,
+              telegramUsername: null,
+              sessionString: null,
+              isActive: false,
+              updatedAt: new Date(),
+            },
+          });
+        } catch (dbErr) {
+          console.warn("DB disconnect error in POST user-config:", dbErr);
+        }
+      }
+      saveMockTelegramConfig({
+        userId: targetUserId,
+        telegramUserId: null,
+        telegramUsername: null,
+        sessionString: null,
+        isActive: false,
+      });
+      return NextResponse.json({
+        success: true,
+        message: "Telegram disconnected successfully",
+        connected: false,
+        isActive: false,
+        isTelegramConnected: false,
+      });
+    }
+
+    if (json.clearTargetChannel) {
+      if (isDatabaseConfigured()) {
+        try {
+          await prisma.telegramChannelConfig.update({
+            where: { userId: targetUserId },
+            data: {
+              targetChannelId: null,
+              targetChannelName: null,
+              targetChannels: [],
+              updatedAt: new Date(),
+            },
+          });
+        } catch (dbErr) {
+          console.warn("DB clearTargetChannel error in POST user-config:", dbErr);
+        }
+      }
+      saveMockTelegramConfig({
+        userId: targetUserId,
+        targetChannelId: null,
+        targetChannelName: null,
+        targetChannels: [],
+      });
+      return NextResponse.json({
+        success: true,
+        message: "Target channel removed successfully",
+        targetChannelId: null,
+        targetChannelName: null,
+        targetChannels: [],
+      });
     }
 
     // Fetch user profile to calculate real subId

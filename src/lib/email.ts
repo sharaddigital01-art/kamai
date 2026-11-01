@@ -13,7 +13,7 @@ export interface SendOtpEmailParams {
   toEmail: string;
   toName?: string;
   otpCode: string;
-  type: "login" | "signup" | "withdrawal";
+  type: "login" | "signup" | "withdrawal" | "password_reset";
   amountFormatted?: string;
   upiId?: string;
 }
@@ -108,6 +108,11 @@ export async function sendOtpEmail(
     explanation = `A payout request for <strong>${amountFormatted || "your funds"}</strong> to UPI ID <strong>${
       upiId || "your UPI"
     }</strong> has been initiated. Enter this code to confirm and process your transfer.`;
+  } else if (type === "password_reset") {
+    subject = `Reset Your Kamai Karo Password: ${otpCode}`;
+    headline = "Reset Your Account Password";
+    explanation =
+      "Use the 6-digit verification code below to securely reset your Kamai Karo account password. If you did not request this change, you can safely ignore this email.";
   }
 
   const htmlContent = `

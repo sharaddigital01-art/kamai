@@ -219,7 +219,7 @@ export function EarnKaroHeader({
                       {(user.name || user.email || "P").slice(0, 2).toUpperCase()}
                     </span>
                     <div>
-                      <h3 className="font-bold text-sm leading-snug">{user.name || "EarnKaro Partner"}</h3>
+                      <h3 className="font-bold text-sm leading-snug">{user.name || "Kamai Karo Partner"}</h3>
                       <p className="text-[11px] text-emerald-200/80 font-mono">ID: {user.id.slice(0, 8)}...</p>
                     </div>
                   </div>
@@ -325,7 +325,7 @@ export function EarnKaroHeader({
               </p>
 
               <a
-                href="https://t.me/earnkaro"
+                href="https://t.me/kamaikaro_bot"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between rounded-xl px-3.5 py-2.5 text-ink hover:bg-canvas transition"
@@ -346,7 +346,7 @@ export function EarnKaroHeader({
               >
                 <div className="flex items-center gap-3">
                   <BookOpen className="h-4 w-4 text-ink-soft" />
-                  <span>EarnKaro Academy</span>
+                  <span>Kamai Karo Academy</span>
                 </div>
                 <ChevronRight className="h-4 w-4 text-ink-faint" />
               </Link>

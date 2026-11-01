@@ -26,9 +26,11 @@ import {
   LogIn,
   UserPlus,
   LoaderCircle,
+  KeyRound,
 } from "lucide-react";
 import { formatINR } from "@/lib/money";
 import { WithdrawModal } from "@/components/WithdrawModal";
+import { ChangePasswordModal } from "@/components/ChangePasswordModal";
 
 interface AuthUserData {
   id: string;
@@ -47,6 +49,7 @@ export default function ProfilePage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const [balances, setBalances] = useState({
     lifetime: 0,
@@ -160,7 +163,7 @@ export default function ProfilePage() {
             </svg>
           </div>
           <h1 className="font-display text-2xl font-black text-white">
-            Welcome to EarnKaro
+            Welcome to Kamai Karo
           </h1>
           <p className="mt-1 text-xs text-emerald-100 max-w-sm mx-auto">
             Log in or create a free account to track your earnings, make profit links, and withdraw real cash to bank.
@@ -225,7 +228,7 @@ export default function ProfilePage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-display text-lg font-black text-white leading-tight">
-                  {user.name || "EarnKaro Partner"}
+                  {user.name || "Kamai Karo Partner"}
                 </h1>
                 <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${isAdmin ? "bg-red-500 text-white" : "bg-amber-400 text-ink"}`}>
                   {isAdmin ? "Admin" : "Partner"}
@@ -418,7 +421,7 @@ export default function ProfilePage() {
             </Link>
 
             <a
-              href="https://t.me/earnkaro"
+              href="https://t.me/kamaikaro_bot"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-between rounded-2xl bg-canvas p-3 text-ink hover:bg-black/5 transition"
@@ -428,7 +431,7 @@ export default function ProfilePage() {
                   <Send className="h-4 w-4" />
                 </span>
                 <div>
-                  <h4 className="font-bold text-xs sm:text-sm">Join EarnKaro Official Telegram</h4>
+                  <h4 className="font-bold text-xs sm:text-sm">Join Kamai Karo Official Telegram</h4>
                   <p className="text-[11px] text-ink-soft">Get top curated deals and instant price drop alerts</p>
                 </div>
               </div>
@@ -443,6 +446,23 @@ export default function ProfilePage() {
             Account Actions
           </div>
           <div className="divide-y divide-black/5 text-xs sm:text-sm">
+            <button
+              type="button"
+              onClick={() => setChangePasswordOpen(true)}
+              className="flex w-full items-center justify-between p-3.5 hover:bg-canvas transition text-left"
+            >
+              <div className="flex items-center gap-3 font-semibold text-ink">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-100 text-ink">
+                  <KeyRound className="h-4 w-4" />
+                </span>
+                <div>
+                  <span>Change Password</span>
+                  <p className="text-[11px] text-ink-soft">Update your login security credentials</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-ink-faint" />
+            </button>
+
             <button
               type="button"
               onClick={handleLogout}
@@ -475,6 +495,13 @@ export default function ProfilePage() {
         onSuccess={() => {
           refreshStats();
         }}
+      />
+
+      {/* Change Password Modal */}
+      <ChangePasswordModal
+        isOpen={changePasswordOpen}
+        onClose={() => setChangePasswordOpen(false)}
+        userEmail={user.email || ""}
       />
     </div>
   );

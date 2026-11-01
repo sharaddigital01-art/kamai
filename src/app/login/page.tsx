@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
+import { ForgotPasswordModal } from "@/components/ForgotPasswordModal";
 
 function LoginForm() {
   const router = useRouter();
@@ -45,6 +46,7 @@ function LoginForm() {
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [forgotModalOpen, setForgotModalOpen] = useState(false);
 
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -338,7 +340,7 @@ function LoginForm() {
             </svg>
           </div>
           <h1 className="font-display text-2xl font-black tracking-tight text-white">
-            Log In to EarnKaro
+            Log In to Kamai Karo
           </h1>
           <p className="mt-1 text-xs text-emerald-100">
             Sign in using your email address to access your deals and dashboard
@@ -483,6 +485,15 @@ function LoginForm() {
                     aria-label="Toggle password visibility"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <div className="flex justify-end mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setForgotModalOpen(true)}
+                    className="text-xs font-semibold text-[#169443] hover:text-[#13803a] hover:underline transition"
+                  >
+                    Forgot Password?
                   </button>
                 </div>
               </div>
@@ -690,6 +701,16 @@ function LoginForm() {
           </div>
         </div>
       </div>
+
+      <ForgotPasswordModal
+        isOpen={forgotModalOpen}
+        onClose={() => setForgotModalOpen(false)}
+        initialEmail={passwordEmail}
+        onSuccess={() => {
+          setSuccessNotice("Password reset successfully! Please log in with your new password.");
+          setPassword("");
+        }}
+      />
     </div>
   );
 }

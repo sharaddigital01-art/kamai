@@ -149,7 +149,7 @@ export async function POST(req: Request) {
           const fallbackName =
             (norm.type === "email"
               ? norm.normalized.split("@")[0]
-              : `Partner ${norm.cleanDigits?.slice(-4) || ""}`.trim()) || "EarnKaro Partner";
+              : `Partner ${norm.cleanDigits?.slice(-4) || ""}`.trim()) || "Kamai Karo Partner";
 
           user = createMockUser({
             id: crypto.randomUUID(),
@@ -170,7 +170,7 @@ export async function POST(req: Request) {
           id: user.id,
           email: user.email || null,
           phone: user.phone || null,
-          name: user.name || "EarnKaro Partner",
+          name: user.name || "Kamai Karo Partner",
           role: user.role || "USER",
           referralCode: user.referralCode,
           createdAt: user.createdAt || new Date().toISOString(),
@@ -277,7 +277,7 @@ export async function POST(req: Request) {
               id: authUserId || crypto.randomUUID(),
               email: norm.type === "email" ? targetEmail : null,
               phone: norm.type === "phone" ? norm.normalized : null,
-              name: authName || targetEmail.split("@")[0] || (isAdmin ? "EarnKaro Admin" : "EarnKaro Partner"),
+              name: authName || targetEmail.split("@")[0] || (isAdmin ? "Kamai Karo Admin" : "Kamai Karo Partner"),
               role: isAdmin ? "ADMIN" : "USER",
               referralCode: randomCode(8),
               subIdPrefix: randomCode(6),
@@ -316,7 +316,7 @@ export async function POST(req: Request) {
           id: authUserId || crypto.randomUUID(),
           email: norm.type === "email" ? targetEmail : `user_${randomCode(6)}@kamai.local`,
           phone: norm.type === "phone" ? norm.normalized : null,
-          name: authName || targetEmail.split("@")[0] || (isAdmin ? "EarnKaro Admin" : "EarnKaro Partner"),
+          name: authName || targetEmail.split("@")[0] || (isAdmin ? "Kamai Karo Admin" : "Kamai Karo Partner"),
           role: isAdmin ? "ADMIN" : "USER",
           referralCode: randomCode(8),
           subIdPrefix: randomCode(6),
@@ -336,7 +336,7 @@ export async function POST(req: Request) {
         id: user.id,
         email: user.email || null,
         phone: user.phone || null,
-        name: user.name || "EarnKaro Partner",
+        name: user.name || "Kamai Karo Partner",
         role: user.role || "USER",
         referralCode: user.referralCode,
         createdAt: user.createdAt || new Date().toISOString(),

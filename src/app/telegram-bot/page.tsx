@@ -23,6 +23,7 @@ import {
   Terminal,
   Zap,
   Tag,
+  Trash2,
 } from "lucide-react";
 
 interface UserProfile {
@@ -69,7 +70,7 @@ export default function TelegramBotPage() {
     "@flipkart_loot_offers",
     "@amazon_great_indian_deals",
     "@fashion_discount_hub",
-    "@earnkaro_hot_deals",
+    "@kamaikaro_hot_deals",
   ]);
 
   const [customChannelInput, setCustomChannelInput] = useState("");
@@ -97,13 +98,10 @@ export default function TelegramBotPage() {
           if (cfgRes.ok) {
             const cfgData = await cfgRes.json();
 
-            // If config.sessionString or config.connected === true or config.isActive === true, immediately display green "Status: Connected"
+            // Strictly check if a valid Telegram session or telegram user ID exists
             const isUserConnected = Boolean(
-              cfgData.sessionString ||
-              cfgData.connected === true ||
-              cfgData.isActive === true ||
-              cfgData.isTelegramConnected === true ||
-              cfgData.telegramUserId
+              (cfgData.sessionString && String(cfgData.sessionString).trim() !== "") ||
+              (cfgData.telegramUserId && String(cfgData.telegramUserId).trim() !== "")
             );
             setConnected(isUserConnected);
 
@@ -288,6 +286,40 @@ export default function TelegramBotPage() {
     }
   }
 
+  async function handleRemoveTargetChannel() {
+    if (!confirm("Are you sure you want to remove and unlink your target deal channel?")) return;
+    setSaving(true);
+    setFeedback(null);
+
+    try {
+      const res = await fetch("/api/telegram/save-config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id,
+          clearTargetChannel: true,
+        }),
+      });
+
+      if (res.ok) {
+        setConfig((prev) => ({
+          ...prev,
+          targetChannelId: "",
+          targetChannelName: "",
+          targetChannels: [],
+        }));
+        setFeedback({ type: "success", text: "Target channel removed successfully." });
+        setTimeout(() => setFeedback(null), 3500);
+      } else {
+        setFeedback({ type: "error", text: "Failed to remove target channel." });
+      }
+    } catch {
+      setFeedback({ type: "error", text: "Network error while removing target channel." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (authLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -442,7 +474,7 @@ export default function TelegramBotPage() {
           {!connected ? (
             <>
               <p className="text-xs text-ink-soft leading-relaxed">
-                Connect your Telegram account with one click. The bot will recognize your EarnKaro user ID and automatically tag every conversion with your unique tracking subID (<strong className="font-mono text-ink">{user.subIdPrefix}_tg</strong>).
+                Connect your Telegram account with one click. The bot will recognize your Kamai Karo user ID and automatically tag every conversion with your unique tracking subID (<strong className="font-mono text-ink">{user.subIdPrefix}_tg</strong>).
               </p>
 
               <div className="flex flex-col sm:flex-row gap-2.5">
@@ -531,7 +563,7 @@ export default function TelegramBotPage() {
                     disabled={disconnecting}
                     className="rounded-xl px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-100/70 active:scale-95 transition ring-1 ring-red-200"
                   >
-                    {disconnecting ? "Unlinking..." : "Unlink"}
+                    {disconnecting ? "Disconnecting..." : "Unlink / Disconnect Telegram"}
                   </button>
                 </div>
               </div>
@@ -551,9 +583,22 @@ export default function TelegramBotPage() {
 
           <div className="p-5 space-y-4">
             <div>
-              <label className="block text-xs font-bold text-ink mb-1.5 uppercase tracking-wide">
-                Target Channel Username or ID
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-bold text-ink uppercase tracking-wide">
+                  Target Channel Username or ID
+                </label>
+                {(Boolean(config.targetChannelId) || (Array.isArray(config.targetChannels) && config.targetChannels.length > 0)) && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveTargetChannel}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-red-600 hover:text-red-700 hover:underline transition"
+                    title="Remove and clear this target channel"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                    <span>Remove Target Channel</span>
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type="text"
@@ -632,9 +677,6 @@ export default function TelegramBotPage() {
                   className="w-full rounded-2xl bg-[#F4F6F5] py-3 px-4 text-sm font-medium text-ink placeholder:text-ink-soft/60 outline-none ring-1 ring-transparent focus:bg-white focus:ring-2 focus:ring-[#169443] transition font-mono"
                 />
               </div>
-              <p className="mt-2 text-xs text-ink-soft leading-relaxed">
-                Agar aap apna direct Amazon affiliate tag daalenge, toh Amazon ki saari deals Cuelinks ke bajay direct aapke Amazon tag se convert hongi.
-              </p>
             </div>
           </div>
         </div>

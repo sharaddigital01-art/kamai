@@ -9,7 +9,7 @@ export interface UnifiedOtpRecord {
   resendAfter: number;
   expiresAt: number;
   attempts: number;
-  type: "signup" | "login" | "withdrawal";
+  type: "signup" | "login" | "withdrawal" | "password_reset";
   name?: string;
   password?: string;
   referralCode?: string;
@@ -413,7 +413,7 @@ export async function createWithdrawalOtp(data: {
     code,
     amountPaise: data.amountPaise,
     upiId: data.upiId.trim(),
-    accountHolder: (data.accountHolder || "EarnKaro Partner").trim(),
+    accountHolder: (data.accountHolder || "Kamai Karo Partner").trim(),
     type: "withdrawal",
     createdAt: now,
     resendAfter: now + RESEND_COOLDOWN_MS,
@@ -429,7 +429,7 @@ export async function createWithdrawalOtp(data: {
   try {
     await sendOtpEmail({
       toEmail: emailKey,
-      toName: data.accountHolder || "EarnKaro Partner",
+      toName: data.accountHolder || "Kamai Karo Partner",
       otpCode: code,
       type: "withdrawal",
       amountFormatted: formatINR(data.amountPaise),
@@ -444,6 +444,68 @@ export async function createWithdrawalOtp(data: {
       2
     )} | UPI: ${data.upiId} | Code: ${code}`
   );
+
+  return {
+    ok: true,
+    code,
+    resendAfterSeconds: 60,
+    cookieValue,
+  };
+}
+
+// -------------------------------------------------------------
+// Password Reset Flow OTP
+// -------------------------------------------------------------
+
+export async function createPasswordResetOtp(data: {
+  email: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  resendAfterSeconds?: number;
+  code?: string;
+  cookieValue?: string;
+}> {
+  const emailKey = data.email.toLowerCase().trim();
+  const existing = getFromUnifiedStore(emailKey);
+  const now = Date.now();
+
+  if (existing && now < existing.resendAfter) {
+    const remaining = Math.ceil((existing.resendAfter - now) / 1000);
+    return {
+      ok: false,
+      error: `Please wait ${remaining}s before requesting a new password reset code.`,
+      resendAfterSeconds: remaining,
+    };
+  }
+
+  const code = generateNumericOtp();
+  const pending: UnifiedOtpRecord = {
+    email: emailKey,
+    identifier: emailKey,
+    code,
+    type: "password_reset",
+    createdAt: now,
+    resendAfter: now + RESEND_COOLDOWN_MS,
+    expiresAt: now + OTP_EXPIRY_MS,
+    attempts: 0,
+  };
+
+  saveToUnifiedStore(emailKey, pending);
+  const cookieValue = signOtpCookie(pending);
+
+  // Send transactional email via Brevo support@kamaikaro.in
+  try {
+    await sendOtpEmail({
+      toEmail: emailKey,
+      otpCode: code,
+      type: "password_reset",
+    });
+  } catch (emailErr: any) {
+    console.warn("sendOtpEmail password_reset delivery notice:", emailErr?.message || emailErr);
+  }
+
+  console.log(`[Kamai OTP] Password Reset OTP for ${emailKey}: ${code}`);
 
   return {
     ok: true,
@@ -592,4 +654,12 @@ export function verifyWithdrawalOtp(params: {
   cookieToken?: string | null;
 }) {
   return verifyUnifiedOtp({ userId: params.userId, otp: params.otp, cookieToken: params.cookieToken });
+}
+
+export function verifyPasswordResetOtp(params: {
+  email: string;
+  otp: string;
+  cookieToken?: string | null;
+}) {
+  return verifyUnifiedOtp({ email: params.email, otp: params.otp, cookieToken: params.cookieToken });
 }

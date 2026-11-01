@@ -93,7 +93,7 @@ export async function POST(req: Request) {
             data: {
               id: generatedId,
               email: cleanEmail,
-              name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
+              name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
               role: isAdmin ? "ADMIN" : "USER",
               referralCode: randomCode(8),
               subIdPrefix: randomCode(6),
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
         user = createMockUser({
           id: crypto.randomUUID(),
           email: cleanEmail,
-          name: pending.name || cleanEmail.split("@")[0] || "EarnKaro Partner",
+          name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
           role: isAdmin ? "ADMIN" : "USER",
           referralCode: randomCode(8),
           subIdPrefix: randomCode(6),
@@ -134,7 +134,7 @@ export async function POST(req: Request) {
         const sessionPayload = {
           id: user.id,
           email: user.email || cleanEmail,
-          name: user.name || "EarnKaro Partner",
+          name: user.name || "Kamai Karo Partner",
           role: user.role || "USER",
           referralCode: user.referralCode,
           createdAt: user.createdAt || new Date().toISOString(),

@@ -306,7 +306,7 @@ export default function AdminPage() {
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-display text-xl font-black text-white">EarnKaro Admin Portal</h1>
+                <h1 className="font-display text-xl font-black text-white">Kamai Karo Admin Portal</h1>
                 <span className="rounded-full bg-emerald-500 text-ink text-[10px] font-black px-2 py-0.5 uppercase">
                   VERIFIED ADMIN
                 </span>
@@ -721,8 +721,8 @@ export default function AdminPage() {
                       <tr key={w.id} className="hover:bg-canvas/50">
                         <td className="py-3 px-4 font-bold text-ink">
                           <div>
-                            <span className="block font-bold">{w.userName || "EarnKaro User"}</span>
-                            <span className="block text-[10px] text-ink-soft font-normal">{w.userEmail || "user@earnkaro.com"}</span>
+                            <span className="block font-bold">{w.userName || "Kamai Karo User"}</span>
+                            <span className="block text-[10px] text-ink-soft font-normal">{w.userEmail || "user@kamaikaro.in"}</span>
                           </div>
                         </td>
                         <td className="num py-3 px-3 font-black text-ink text-sm">
@@ -924,7 +924,7 @@ export default function AdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl animate-in zoom-in-95">
             <h3 className="font-display font-extrabold text-base text-ink mb-1">Add Partner Brand</h3>
-            <p className="text-xs text-ink-soft mb-4">Register a new store into the EarnKaro platform.</p>
+            <p className="text-xs text-ink-soft mb-4">Register a new store into the Kamai Karo platform.</p>
 
             <form onSubmit={handleAddStore} className="space-y-3 text-xs">
               <div>

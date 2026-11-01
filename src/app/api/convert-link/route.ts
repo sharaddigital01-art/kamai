@@ -107,8 +107,8 @@ export async function POST(req: Request) {
         update: {},
         create: {
           id: userId,
-          email: "partner@earnkaro.local",
-          name: "EarnKaro Partner",
+          email: "partner@kamaikaro.local",
+          name: "Kamai Karo Partner",
           referralCode: "EK" + code.slice(0, 6).toUpperCase(),
           subIdPrefix: userPrefix,
         },

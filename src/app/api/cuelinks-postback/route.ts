@@ -197,8 +197,8 @@ async function handlePostback(rawParams: Record<string, any>) {
         update: {},
         create: {
           id: targetUserId,
-          email: "partner@earnkaro.local",
-          name: "EarnKaro Partner",
+          email: "partner@kamaikaro.local",
+          name: "Kamai Karo Partner",
           referralCode: "EK" + txId.slice(-6).toUpperCase(),
           subIdPrefix: "ek",
         },
@@ -209,8 +209,8 @@ async function handlePostback(rawParams: Record<string, any>) {
         update: {},
         create: {
           id: ADMIN_USER_ID,
-          email: "admin@earnkaro.local",
-          name: "EarnKaro Platform Admin",
+          email: "admin@kamaikaro.local",
+          name: "Kamai Karo Platform Admin",
           role: "ADMIN",
           referralCode: "EKADMIN",
           subIdPrefix: "ekadm",

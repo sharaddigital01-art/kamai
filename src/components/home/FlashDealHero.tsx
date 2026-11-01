@@ -70,7 +70,7 @@ export function FlashDealHero() {
         </div>
       </div>
 
-      {/* Hero Card Container matching EarnKaro visual structure */}
+      {/* Hero Card Container matching Kamai Karo visual structure */}
       <article
         onClick={() => openModal({ input: productUrl, autoConvert: true })}
         className="group flex flex-col justify-between overflow-hidden rounded-3xl bg-white shadow-lg ring-1 ring-black/10 transition hover:shadow-xl cursor-pointer"

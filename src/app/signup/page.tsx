@@ -277,7 +277,7 @@ function SignupForm() {
             )}
           </div>
           <h1 className="font-display text-2xl font-black tracking-tight text-white">
-            {step === 1 ? "Join EarnKaro" : "Verify Email OTP"}
+            {step === 1 ? "Join Kamai Karo" : "Verify Email OTP"}
           </h1>
           <p className="mt-1 text-xs text-emerald-100">
             {step === 1
@@ -536,7 +536,7 @@ function SignupForm() {
 
           {/* Already have an account */}
           <div className="mt-6 text-center text-xs text-ink-soft">
-            Already have an EarnKaro account?{" "}
+            Already have a Kamai Karo account?{" "}
             <Link
               href={`/login${nextPath ? `?next=${encodeURIComponent(nextPath)}` : ""}`}
               className="font-bold text-[#169443] hover:underline"

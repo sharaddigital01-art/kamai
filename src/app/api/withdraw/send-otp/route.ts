@@ -99,7 +99,7 @@ export async function POST(req: Request) {
       email: userEmail,
       amountPaise,
       upiId,
-      accountHolder: accountHolder || user.name || "EarnKaro Partner",
+      accountHolder: accountHolder || user.name || "Kamai Karo Partner",
     });
 
     if (!otpResult.ok) {
