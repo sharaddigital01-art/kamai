@@ -232,26 +232,37 @@ export async function resolveUserBySubId(subId: string): Promise<string | null> 
 }
 
 export async function fetchCuelinksTransactions(options: {
-  startDate: string;
-  endDate: string;
+  startDate?: string;
+  endDate?: string;
   apiKey?: string;
+  channelId?: string;
+  subId?: string | null;
 }): Promise<RawCuelinksTransaction[]> {
   const apiKey =
     options.apiKey ||
     process.env.CUELINKS_API_KEY ||
     "8ir_BIfBqgKif2bcVsjbPeihyADLwkEoYTvwYqUB174";
+  const channelId =
+    options.channelId ||
+    process.env.CUELINKS_CHANNEL_ID ||
+    "332862";
 
   if (!apiKey) {
     console.warn("No CUELINKS_API_KEY configured for sync-conversions");
     return [];
   }
 
-  const url = `https://www.cuelinks.com/api/v2/transactions.json?start_date=${encodeURIComponent(
-    options.startDate
-  )}&end_date=${encodeURIComponent(options.endDate)}`;
+  const cleanSubId = (options.subId || "").trim();
+
+  // Primary endpoint: https://api.cuelinks.com/v2/transactions.json?subid=<user_subid>
+  const urlObj = new URL("https://api.cuelinks.com/v2/transactions.json");
+  if (channelId) urlObj.searchParams.set("channel_id", channelId);
+  if (options.startDate) urlObj.searchParams.set("start_date", options.startDate);
+  if (options.endDate) urlObj.searchParams.set("end_date", options.endDate);
+  if (cleanSubId) urlObj.searchParams.set("subid", cleanSubId);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(urlObj.toString(), {
       method: "GET",
       headers: {
         Authorization: `Token token=${apiKey}`,
@@ -261,16 +272,41 @@ export async function fetchCuelinksTransactions(options: {
       signal: AbortSignal.timeout(10000),
     });
 
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      console.warn(`Cuelinks API v2 transactions returned ${res.status}: ${errText}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json.transactions)) return json.transactions;
+      if (Array.isArray(json.data)) return json.data;
       return [];
     }
 
-    const json = await res.json();
-    if (Array.isArray(json)) return json;
-    if (Array.isArray(json.transactions)) return json.transactions;
-    if (Array.isArray(json.data)) return json.data;
+    // Secondary fallback: https://www.cuelinks.com/api/v2/transactions.json
+    const fallbackUrl = new URL("https://www.cuelinks.com/api/v2/transactions.json");
+    if (channelId) fallbackUrl.searchParams.set("channel_id", channelId);
+    if (options.startDate) fallbackUrl.searchParams.set("start_date", options.startDate);
+    if (options.endDate) fallbackUrl.searchParams.set("end_date", options.endDate);
+    if (cleanSubId) fallbackUrl.searchParams.set("subid", cleanSubId);
+
+    const fallbackRes = await fetch(fallbackUrl.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Token token=${apiKey}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => null);
+
+    if (fallbackRes && fallbackRes.ok) {
+      const json = await fallbackRes.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json.transactions)) return json.transactions;
+      if (Array.isArray(json.data)) return json.data;
+      return [];
+    }
+
+    const errText = await res.text().catch(() => "");
+    console.warn(`Cuelinks API v2 transactions returned ${res.status}: ${errText}`);
     return [];
   } catch (err: any) {
     console.warn("Error fetching Cuelinks transactions:", err?.message || err);
@@ -280,7 +316,11 @@ export async function fetchCuelinksTransactions(options: {
 
 export async function syncCuelinksTransactions(
   transactions: RawCuelinksTransaction[],
-  options: { userCommissionPercent?: number } = {}
+  options: {
+    userCommissionPercent?: number;
+    filterUserId?: string;
+    targetSubId?: string;
+  } = {}
 ): Promise<{ stats: SyncStats; results: any[] }> {
   const userCommissionPercent =
     options.userCommissionPercent || Number(process.env.USER_COMMISSION_PERCENT || 70);
@@ -347,7 +387,10 @@ export async function syncCuelinksTransactions(
       tx.status ?? tx.validation_status ?? tx.state
     );
 
-    const resolvedUserId = (await resolveUserBySubId(subId)) || DEMO_USER.id;
+    const resolvedUserId =
+      (await resolveUserBySubId(subId)) ||
+      options.filterUserId ||
+      DEMO_USER.id;
 
     const totalCommissionPaise = Math.round(commission * 100);
     const userEarningsPaise = Math.round(totalCommissionPaise * userRatio);

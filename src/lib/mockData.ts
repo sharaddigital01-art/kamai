@@ -475,6 +475,8 @@ export interface MockClickEvent {
   timestamp: Date;
   store: string;
   ip: string;
+  userId?: string | null;
+  subId?: string | null;
 }
 
 export interface MockUserRecord {
@@ -624,12 +626,16 @@ export function getLiveWithdrawals(): MockWithdrawalItem[] {
   return g.mockWithdrawals || [];
 }
 
-export function getLiveClicks(): MockClickEvent[] {
-  return g.mockClicks || [];
+export function getLiveClicks(userId?: string): MockClickEvent[] {
+  const clicks: MockClickEvent[] = g.mockClicks || [];
+  if (!userId || userId === DEMO_USER.id) return clicks;
+  return clicks.filter((c) => c.userId === userId || !c.userId);
 }
 
-export function getLiveTotalClicks(): number {
-  return g.totalClicks || 0;
+export function getLiveTotalClicks(userId?: string): number {
+  if (!userId || userId === DEMO_USER.id) return g.totalClicks || 0;
+  const clicks: MockClickEvent[] = g.mockClicks || [];
+  return clicks.filter((c) => c.userId === userId).length;
 }
 
 export function getLiveStats() {
@@ -778,7 +784,11 @@ export function getMockLinkByCode(code: string): MockLink | undefined {
 }
 
 // Clicks Tracker: Real dynamic counting
-export function incrementMockLinkClick(code: string) {
+export function incrementMockLinkClick(
+  code: string,
+  userId?: string | null,
+  subId?: string | null
+) {
   if (g.totalClicks === undefined) g.totalClicks = 0;
   g.totalClicks += 1;
 
@@ -786,6 +796,9 @@ export function incrementMockLinkClick(code: string) {
 
   const item = g.mockLinks?.get(code);
   let storeName = "Flipkart";
+  const effectiveUserId = userId || item?.userId || null;
+  const effectiveSubId = subId || item?.subId || null;
+
   if (item) {
     item.clickCount += 1;
     item.lastClickedAt = new Date();
@@ -797,6 +810,8 @@ export function incrementMockLinkClick(code: string) {
     timestamp: new Date(),
     store: storeName,
     ip: "192.168.1." + Math.floor(Math.random() * 200 + 10),
+    userId: effectiveUserId,
+    subId: effectiveSubId,
   });
 
   if (g.mockClicks.length > 50) g.mockClicks.pop();
@@ -1382,6 +1397,7 @@ export interface MockShortLink {
   originalUrl: string;
   targetUrl: string;
   userId?: string | null;
+  subId?: string | null;
   clickCount: number;
   createdAt: Date;
   updatedAt: Date;
@@ -1392,6 +1408,7 @@ export function saveMockShortLink(data: {
   originalUrl?: string;
   targetUrl?: string;
   userId?: string | null;
+  subId?: string | null;
 }): MockShortLink {
   if (!g.mockShortLinks) g.mockShortLinks = new Map();
   const existing = g.mockShortLinks.get(data.slug);
@@ -1404,6 +1421,7 @@ export function saveMockShortLink(data: {
     originalUrl,
     targetUrl,
     userId: data.userId || null,
+    subId: data.subId || existing?.subId || null,
     clickCount: existing?.clickCount || 0,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -1417,9 +1435,16 @@ export function getMockShortLinkBySlug(slug: string): MockShortLink | null {
   return g.mockShortLinks.get(slug) || null;
 }
 
-export function incrementMockShortLinkClick(slug: string): void {
+export function incrementMockShortLinkClick(
+  slug: string,
+  userId?: string | null,
+  subId?: string | null
+): void {
   if (!g.mockShortLinks) g.mockShortLinks = new Map();
   const item = g.mockShortLinks.get(slug);
+  const effectiveUserId = userId || item?.userId || null;
+  const effectiveSubId = subId || item?.subId || null;
+
   if (item) {
     item.clickCount = (item.clickCount || 0) + 1;
     item.updatedAt = new Date();
@@ -1432,5 +1457,7 @@ export function incrementMockShortLinkClick(slug: string): void {
     timestamp: new Date(),
     store: "ShortLink",
     ip: "192.168.1." + Math.floor(Math.random() * 200 + 10),
+    userId: effectiveUserId,
+    subId: effectiveSubId,
   });
 }

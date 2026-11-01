@@ -5,6 +5,7 @@ import {
   isDatabaseConfigured,
   DEMO_USER,
   upsertMockConversion,
+  findMockUserById,
 } from "@/lib/mockData";
 import {
   resolveUserBySubId,
@@ -35,13 +36,45 @@ async function handleSync(req: Request) {
   const endDate =
     reqUrl.searchParams.get("end_date") || reqUrl.searchParams.get("endDate");
   const filterUserId = reqUrl.searchParams.get("userId");
+  const rawSubId =
+    reqUrl.searchParams.get("subid") || reqUrl.searchParams.get("subId");
 
+  // Get current logged-in user if available to associate subids when matching
+  const authUser = await getApiUser().catch(() => null);
+  const effectiveUserId = filterUserId || authUser?.id || null;
+
+  // Resolve the user's active subId strictly (never a static or master account subId)
+  let activeSubId: string | null = (rawSubId || "").trim() || null;
+  if (!activeSubId && effectiveUserId) {
+    if (isDatabaseConfigured()) {
+      try {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: effectiveUserId },
+          select: { subIdPrefix: true, referralCode: true, id: true },
+        });
+        if (dbUser) {
+          activeSubId = dbUser.subIdPrefix || dbUser.referralCode || `${dbUser.id.slice(0, 6)}_tg`;
+        }
+      } catch (err) {
+        console.warn("Error fetching user for activeSubId:", err);
+      }
+    }
+    if (!activeSubId) {
+      const mockU = findMockUserById(effectiveUserId);
+      if (mockU) {
+        activeSubId = mockU.subIdPrefix || mockU.referralCode || `${mockU.id.slice(0, 6)}_tg`;
+      }
+    }
+  }
+
+  // Construct Cuelinks API URL with active subId filter
   const cuelinksUrl = new URL(
-    "https://www.cuelinks.com/api/v2/transactions.json"
+    "https://api.cuelinks.com/v2/transactions.json"
   );
   cuelinksUrl.searchParams.set("channel_id", channelId);
   if (startDate) cuelinksUrl.searchParams.set("start_date", startDate);
   if (endDate) cuelinksUrl.searchParams.set("end_date", endDate);
+  if (activeSubId) cuelinksUrl.searchParams.set("subid", activeSubId);
 
   let rawTransactions: RawCuelinksTransaction[] = [];
 
@@ -62,18 +95,39 @@ async function handleSync(req: Request) {
       else if (Array.isArray(json.transactions)) rawTransactions = json.transactions;
       else if (Array.isArray(json.data)) rawTransactions = json.data;
     } else {
-      const errText = await res.text().catch(() => "");
-      console.warn(
-        `Cuelinks API returned status ${res.status} for channel ${channelId}:`,
-        errText
-      );
+      // Secondary fallback to www.cuelinks.com
+      const fallbackUrl = new URL("https://www.cuelinks.com/api/v2/transactions.json");
+      fallbackUrl.searchParams.set("channel_id", channelId);
+      if (startDate) fallbackUrl.searchParams.set("start_date", startDate);
+      if (endDate) fallbackUrl.searchParams.set("end_date", endDate);
+      if (activeSubId) fallbackUrl.searchParams.set("subid", activeSubId);
+
+      const fallbackRes = await fetch(fallbackUrl.toString(), {
+        method: "GET",
+        headers: {
+          Authorization: `Token token=${apiKey}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => null);
+
+      if (fallbackRes && fallbackRes.ok) {
+        const json = await fallbackRes.json();
+        if (Array.isArray(json)) rawTransactions = json;
+        else if (Array.isArray(json.transactions)) rawTransactions = json.transactions;
+        else if (Array.isArray(json.data)) rawTransactions = json.data;
+      } else {
+        const errText = await res.text().catch(() => "");
+        console.warn(
+          `Cuelinks API returned status ${res.status} for channel ${channelId}:`,
+          errText
+        );
+      }
     }
   } catch (err: any) {
     console.warn("Cuelinks transactions fetch error:", err?.message || err);
   }
-
-  // Get current logged-in user if available to associate subids when matching
-  const authUser = await getApiUser().catch(() => null);
 
   let synced = 0;
   let updated = 0;
@@ -291,6 +345,7 @@ async function handleSync(req: Request) {
   const response = NextResponse.json({
     success: true,
     channelId,
+    activeSubId: activeSubId || null,
     totalFetched: rawTransactions.length,
     synced,
     updated,

@@ -10,6 +10,7 @@ import {
   getLiveClicks,
   getLiveTotalClicks,
   getMockConversions,
+  findMockUserById,
   DEMO_USER,
 } from "@/lib/mockData";
 
@@ -17,8 +18,26 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
-  const user = await getApiUser().catch(() => null);
+export async function GET(req: Request) {
+  let user = await getApiUser().catch(() => null);
+
+  const reqUrl = req?.url ? new URL(req.url) : null;
+  const queryUserId = reqUrl?.searchParams.get("userId");
+  const querySubId =
+    reqUrl?.searchParams.get("subid") || reqUrl?.searchParams.get("subId");
+
+  if (!user && (queryUserId || querySubId)) {
+    if (queryUserId && isDatabaseConfigured()) {
+      try {
+        const u = await prisma.user.findUnique({ where: { id: queryUserId } });
+        if (u) user = u as any;
+      } catch {}
+    }
+    if (!user && queryUserId) {
+      const mockU = findMockUserById(queryUserId);
+      if (mockU) user = mockU as any;
+    }
+  }
 
   const emptyDailyStats = ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"].map((label) => ({
     date: "",
@@ -136,14 +155,44 @@ export async function GET() {
         requestedAt: w.requestedAt,
       }));
 
-      // 2. Real Total Clicks = Click rows + ShortLink clicks + GeneratedLink clicks
-      const clicksCount = await prisma.click.count({ where: { userId: user.id } });
+      // 2. Real Total Clicks = Click rows matching userId OR subId + ShortLink clicks + GeneratedLink clicks
+      const userPrefix = (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
+      const userSubIds = [
+        userPrefix,
+        `${userPrefix}_tg`,
+        `${userPrefix}_web`,
+        `${userPrefix}_link`,
+        user.id,
+        user.referralCode,
+      ].filter(Boolean);
+
+      const clicksCount = await prisma.click.count({
+        where: {
+          OR: [
+            { userId: user.id },
+            { subId: { in: userSubIds } },
+            { subId: { startsWith: userPrefix } },
+          ],
+        },
+      });
       const shortAgg = await prisma.shortLink.aggregate({
-        where: { userId: user.id },
+        where: {
+          OR: [
+            { userId: user.id },
+            { subId: { in: userSubIds } },
+            { subId: { startsWith: userPrefix } },
+          ],
+        },
         _sum: { clickCount: true },
       });
       const genAgg = await prisma.generatedLink.aggregate({
-        where: { userId: user.id },
+        where: {
+          OR: [
+            { userId: user.id },
+            { subId: { in: userSubIds } },
+            { subId: { startsWith: userPrefix } },
+          ],
+        },
         _sum: { clickCount: true },
       });
       const sumShort = shortAgg._sum.clickCount ?? 0;
@@ -151,7 +200,6 @@ export async function GET() {
       totalClicks = Math.max(clicksCount, sumShort + sumGen);
 
       // 3. User Conversions by userId OR subId
-      const userPrefix = (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
       const userConversions = await prisma.conversion.findMany({
         where: {
           OR: [
@@ -203,7 +251,11 @@ export async function GET() {
 
       const recentClicks = await prisma.click.findMany({
         where: {
-          userId: user.id,
+          OR: [
+            { userId: user.id },
+            { subId: { in: userSubIds } },
+            { subId: { startsWith: userPrefix } },
+          ],
           createdAt: { gte: sevenDaysAgo },
         },
         select: { createdAt: true },
@@ -258,7 +310,10 @@ export async function GET() {
     ledger = getLiveLedger().filter((l) => (l as any).userId === user.id || user.id === DEMO_USER.id);
     withdrawals = getLiveWithdrawals().filter((w) => w.userId === user.id || user.id === DEMO_USER.id);
     conversions = getMockConversions(user.id);
-    totalClicks = getLiveTotalClicks();
+    totalClicks = Math.max(
+      getLiveTotalClicks(user.id),
+      getLiveClicks(user.id).length
+    );
     totalTxns = Math.max(
       conversions.length,
       ledger.filter((l) => l.status === "CONFIRMED" || l.status === "PAID").length
@@ -282,14 +337,20 @@ export async function GET() {
 
   const convRate = totalClicks > 0 ? `${((totalTxns / totalClicks) * 100).toFixed(1)}%` : "0.0%";
 
+  const userPrefix =
+    (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
+  const activeSubId = querySubId || `${userPrefix}_tg` || userPrefix;
+
   const res = NextResponse.json({
     authenticated: true,
+    activeSubId,
     user: {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
       referralCode: user.referralCode,
+      subIdPrefix: (user as any).subIdPrefix || userPrefix,
     },
     balances,
     stats: {
@@ -307,7 +368,7 @@ export async function GET() {
     conversions,
     ledger,
     withdrawals,
-    recentClicks: getLiveClicks().slice(0, 20),
+    recentClicks: getLiveClicks(user.id).slice(0, 20),
   });
 
   res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");

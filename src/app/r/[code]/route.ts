@@ -21,18 +21,23 @@ function hashIp(ip: string): string {
   return createHash("sha256").update(`${process.env.CLICK_HASH_SECRET ?? "dev"}:${day}:${ip}`).digest("hex");
 }
 
-async function resolveLink(code: string): Promise<CachedLink | null> {
-  const hit = getCachedLink(code);
+export interface ExtendedCachedLink extends CachedLink {
+  subId?: string | null;
+}
+
+async function resolveLink(code: string): Promise<ExtendedCachedLink | null> {
+  const hit = getCachedLink(code) as ExtendedCachedLink | null;
   if (hit) return hit;
 
   const mock = getMockLinkByCode(code);
   if (mock) {
-    const row: CachedLink = {
+    const row: ExtendedCachedLink = {
       id: mock.id,
       userId: mock.userId,
       storeId: mock.storeId,
       dealId: mock.dealId,
       destinationUrl: mock.destinationUrl,
+      subId: (mock as any).subId || null,
     };
     setCachedLink(code, row);
     return row;
@@ -43,9 +48,16 @@ async function resolveLink(code: string): Promise<CachedLink | null> {
   try {
     const row = await prisma.generatedLink.findUnique({
       where: { code },
-      select: { id: true, userId: true, storeId: true, dealId: true, destinationUrl: true },
+      select: {
+        id: true,
+        userId: true,
+        storeId: true,
+        dealId: true,
+        destinationUrl: true,
+        subId: true,
+      },
     });
-    if (row) setCachedLink(code, row);
+    if (row) setCachedLink(code, row as any);
     return row;
   } catch (err) {
     console.warn("Database error in resolveLink:", err);
@@ -74,38 +86,59 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
   const referer = req.headers.get("referer")?.slice(0, 300) ?? null;
   const isBot = !ua || BOT_RE.test(ua);
+  const clickedAt = new Date();
+  const ipHash = hashIp(ip);
+  const devType = deviceType(ua);
 
-  // Respond first, record after: tracking must never slow or break the redirect.
-  after(async () => {
-    if (!isDatabaseConfigured()) {
-      if (!isBot) incrementMockLinkClick(code);
-      return;
-    }
+  // Record live click row in database immediately before redirecting
+  if (isDatabaseConfigured()) {
     try {
       await prisma.$transaction([
         prisma.click.create({
           data: {
             linkId: link.id,
-            userId: link.userId,
-            storeId: link.storeId,
-            ipHash: hashIp(ip),
+            userId: link.userId || undefined,
+            subId: link.subId || undefined,
+            storeId: link.storeId || undefined,
+            ipHash,
             userAgent: ua.slice(0, 300) || null,
             referer,
-            deviceType: deviceType(ua),
+            deviceType: devType,
             isBot,
+            createdAt: clickedAt,
           },
         }),
         ...(isBot
           ? []
           : [
-              prisma.generatedLink.update({ where: { id: link.id }, data: { clickCount: { increment: 1 }, lastClickedAt: new Date() } }),
-              ...(link.dealId ? [prisma.deal.update({ where: { id: link.dealId }, data: { clickCount: { increment: 1 } } })] : []),
+              prisma.generatedLink.update({
+                where: { id: link.id },
+                data: { clickCount: { increment: 1 }, lastClickedAt: clickedAt },
+              }),
+              ...(link.dealId
+                ? [
+                    prisma.deal.update({
+                      where: { id: link.dealId },
+                      data: { clickCount: { increment: 1 } },
+                    }),
+                  ]
+                : []),
             ]),
       ]);
     } catch (e) {
-      console.error("click tracking failed", e);
+      console.warn("Live click tracking failed in /r/[code]:", e);
     }
-  });
+  }
 
-  return NextResponse.redirect(dest, { status: 302, headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+  // Always sync live click into mock tracker for real-time local display
+  incrementMockLinkClick(code, link.userId, link.subId);
+
+  return NextResponse.redirect(dest, {
+    status: 302,
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+      Pragma: "no-cache",
+      "Referrer-Policy": "no-referrer",
+    },
+  });
 }

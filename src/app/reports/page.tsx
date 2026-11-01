@@ -55,6 +55,12 @@ export default function ReportsPage() {
     orders: number;
   } | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    subId?: string | null;
+  } | null>(null);
 
   const [stats, setStats] = useState<StatsData>({
     totalProfitPaise: 0,
@@ -73,12 +79,40 @@ export default function ReportsPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
 
-  async function loadData() {
+  async function loadData(forceBypass = false, userOverride?: { id: string; subId?: string | null }) {
     try {
-      const res = await fetch("/api/stats", { cache: "no-store" });
+      const timestamp = Date.now();
+      const params = new URLSearchParams();
+      if (forceBypass) {
+        params.set("_t", String(timestamp));
+      }
+      const targetUserId = userOverride?.id || currentUser?.id;
+      const targetSubId = userOverride?.subId || currentUser?.subId;
+      if (targetUserId) params.set("userId", targetUserId);
+      if (targetSubId) params.set("subid", targetSubId);
+
+      const qs = params.toString();
+      const url = qs ? `/api/reports?${qs}` : "/api/reports";
+
+      const res = await fetch(url, {
+        cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+          Pragma: "no-cache",
+        },
+      });
+
       if (res.ok) {
         const data = await res.json();
         setIsAuthenticated(Boolean(data.authenticated));
+        if (data.user) {
+          setCurrentUser({
+            id: data.user.id,
+            name: data.user.name,
+            email: data.user.email,
+            subId: data.activeSubId || data.user.subIdPrefix || null,
+          });
+        }
         if (data.stats) setStats(data.stats);
         if (data.ledger) setLedger(data.ledger);
         if (Array.isArray(data.dailyStats) && data.dailyStats.length > 0) {
@@ -98,10 +132,22 @@ export default function ReportsPage() {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const res = await fetch("/api/sync/cuelinks", {
+      const timestamp = Date.now();
+      const params = new URLSearchParams();
+      params.set("_t", String(timestamp));
+      if (currentUser?.id) params.set("userId", currentUser.id);
+      if (currentUser?.subId) params.set("subid", currentUser.subId);
+
+      // Force immediate live sync bypassing caching with user's exact subId
+      const res = await fetch(`/api/sync/cuelinks?${params.toString()}`, {
         method: "POST",
         cache: "no-store",
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+          Pragma: "no-cache",
+        },
       });
+
       if (res.ok) {
         const json = await res.json();
         const count = json.synced ?? json.totalFetched ?? 0;
@@ -109,11 +155,12 @@ export default function ReportsPage() {
       } else {
         setSyncMessage("Live sync complete.");
       }
-      await loadData();
+      // Force immediate database re-read for that specific userId with fresh timestamp
+      await loadData(true);
     } catch (err) {
       console.warn("Error refreshing live Cuelinks data:", err);
       setSyncMessage("Refreshed local stats.");
-      await loadData();
+      await loadData(true);
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMessage(null), 4000);
@@ -271,7 +318,7 @@ export default function ReportsPage() {
               className="flex items-center gap-1 rounded-full bg-white/20 hover:bg-white/30 px-2.5 py-1 text-[11px] font-bold text-white transition active:scale-95 disabled:opacity-50"
             >
               <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-              <span>{syncing ? "Syncing..." : "Refresh Live Data"}</span>
+              <span>{syncing ? "Syncing..." : "Refresh Sync"}</span>
             </button>
             <button
               type="button"
@@ -361,7 +408,7 @@ export default function ReportsPage() {
             className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-[#169443] ring-1 ring-[#169443]/30 hover:bg-emerald-100 transition active:scale-95 disabled:opacity-50"
           >
             <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
-            <span>{syncing ? "Syncing..." : "Refresh Live Data"}</span>
+            <span>{syncing ? "Syncing..." : "Refresh Sync"}</span>
           </button>
         </div>
 

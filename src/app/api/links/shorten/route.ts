@@ -108,6 +108,21 @@ export async function POST(req: Request) {
       }
     }
 
+    let userSubId: string | null = null;
+    if (validUserId && isDatabaseConfigured()) {
+      try {
+        const u = await prisma.user.findUnique({
+          where: { id: validUserId },
+          select: { subIdPrefix: true, referralCode: true },
+        });
+        if (u) userSubId = u.subIdPrefix || u.referralCode || `${validUserId.slice(0, 6)}_short`;
+      } catch {}
+    }
+    if (!userSubId && validUserId) {
+      const mockU = (globalThis as any).mockUsers?.get(validUserId);
+      if (mockU) userSubId = mockU.subIdPrefix || mockU.referralCode;
+    }
+
     let savedRecord: any = null;
 
     if (isDatabaseConfigured()) {
@@ -118,6 +133,7 @@ export async function POST(req: Request) {
             originalUrl,
             targetUrl: originalUrl,
             userId: validUserId,
+            subId: userSubId,
           },
         });
       } catch (dbErr: any) {
@@ -138,6 +154,7 @@ export async function POST(req: Request) {
         originalUrl,
         targetUrl: originalUrl,
         userId: validUserId,
+        subId: userSubId,
       });
     }
 

@@ -92,6 +92,9 @@ export async function GET(
 
     // Track click in database before redirecting
     let cachedTracked = false;
+    let cachedUserId: string | null = null;
+    let cachedSubId: string | null = null;
+
     if (isDatabaseConfigured()) {
       try {
         const shortRec = await prisma.shortLink.findUnique({
@@ -100,6 +103,9 @@ export async function GET(
         });
 
         if (shortRec) {
+          cachedUserId = shortRec.userId;
+          cachedSubId = shortRec.subId;
+          const clickedAt = new Date();
           await prisma.$transaction([
             prisma.shortLink.update({
               where: { id: shortRec.id },
@@ -115,6 +121,7 @@ export async function GET(
                 referer,
                 deviceType: devType,
                 isBot,
+                createdAt: clickedAt,
               },
             }),
           ]);
@@ -126,10 +133,13 @@ export async function GET(
           });
 
           if (genRec) {
+            cachedUserId = genRec.userId;
+            cachedSubId = genRec.subId;
+            const clickedAt = new Date();
             await prisma.$transaction([
               prisma.generatedLink.update({
                 where: { id: genRec.id },
-                data: { clickCount: { increment: 1 }, lastClickedAt: new Date() },
+                data: { clickCount: { increment: 1 }, lastClickedAt: clickedAt },
               }),
               prisma.click.create({
                 data: {
@@ -142,6 +152,7 @@ export async function GET(
                   referer,
                   deviceType: devType,
                   isBot,
+                  createdAt: clickedAt,
                 },
               }),
             ]);
@@ -153,9 +164,8 @@ export async function GET(
       }
     }
 
-    if (!cachedTracked) {
-      incrementMockShortLinkClick(slug);
-    }
+    // Always update runtime mock tracker for instant live stats
+    incrementMockShortLinkClick(slug, cachedUserId, cachedSubId);
 
     const res = NextResponse.redirect(dest, 307);
     res.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -270,6 +280,10 @@ export async function GET(
 
     // Real-time click tracking before redirecting
     let trackedInDb = false;
+    const clickedAt = new Date();
+    const ownerUserId = shortRecord?.userId || genRecord?.userId || null;
+    const clickSubId = shortRecord?.subId || genRecord?.subId || null;
+
     if (isDatabaseConfigured()) {
       try {
         if (shortRecord) {
@@ -288,6 +302,7 @@ export async function GET(
                 referer,
                 deviceType: devType,
                 isBot,
+                createdAt: clickedAt,
               },
             }),
           ]);
@@ -296,7 +311,7 @@ export async function GET(
           await prisma.$transaction([
             prisma.generatedLink.update({
               where: { id: genRecord.id },
-              data: { clickCount: { increment: 1 }, lastClickedAt: new Date() },
+              data: { clickCount: { increment: 1 }, lastClickedAt: clickedAt },
             }),
             prisma.click.create({
               data: {
@@ -309,6 +324,7 @@ export async function GET(
                 referer,
                 deviceType: devType,
                 isBot,
+                createdAt: clickedAt,
               },
             }),
           ]);
@@ -327,6 +343,7 @@ export async function GET(
                 referer,
                 deviceType: devType,
                 isBot,
+                createdAt: clickedAt,
               },
             }),
           ]);
@@ -337,12 +354,11 @@ export async function GET(
       }
     }
 
-    if (!trackedInDb) {
-      if (isShortLink) {
-        incrementMockShortLinkClick(slug);
-      } else {
-        incrementMockLinkClick(slug);
-      }
+    // Always record in runtime memory tracker for instant live click updates
+    if (isShortLink) {
+      incrementMockShortLinkClick(slug, ownerUserId, clickSubId);
+    } else {
+      incrementMockLinkClick(slug, ownerUserId, clickSubId);
     }
 
     const response = NextResponse.redirect(dest, 307);
