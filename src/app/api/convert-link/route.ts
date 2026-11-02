@@ -5,6 +5,7 @@ import { getApiUser } from "@/lib/auth";
 import { shortUrlFor } from "@/lib/affiliateConfig";
 import { convertWithCuelinks } from "@/lib/cuelinks";
 import { extractUrl, detectStore } from "@/lib/linkConverter";
+import { isAmazonUrl, createAmazonAffiliateLink } from "@/lib/affiliate/amazon";
 import { prisma } from "@/lib/prisma";
 import { randomCode } from "@/lib/shortcode";
 import { estimateProfitPaise } from "@/lib/profit";
@@ -72,6 +73,42 @@ export async function POST(req: Request) {
   const user = await getApiUser().catch(() => null);
   const userId = user?.id || "00000000-0000-0000-0000-000000000001";
   const userPrefix = user?.subIdPrefix || "ek";
+
+  // Check if link is Amazon -> use Native Amazon Associates Engine
+  if (isAmazonUrl(extracted)) {
+    const amazonRes = await createAmazonAffiliateLink(extracted, userId, {
+      dealId: body.dealId,
+      subId: body.subId,
+    });
+
+    return NextResponse.json({
+      success: true,
+      cuelinksUrl: amazonRes.destinationUrl,
+      shortUrl: amazonRes.shortUrl,
+      appShortUrl: amazonRes.appShortUrl,
+      code: amazonRes.code,
+      campaign: "Amazon",
+      store: amazonRes.store,
+      source: "amazon_direct",
+      provider: "amazon_direct",
+      clickRefId: amazonRes.clickRefId,
+      link: {
+        code: amazonRes.code,
+        shortUrl: amazonRes.shortUrl,
+        appShortUrl: amazonRes.appShortUrl,
+        cuelinksUrl: amazonRes.destinationUrl,
+        destinationUrl: amazonRes.destinationUrl,
+        canonicalUrl: amazonRes.canonicalUrl,
+        createdAt: new Date().toISOString(),
+        clickCount: 0,
+        provider: "amazon_direct",
+        clickRefId: amazonRes.clickRefId,
+        store: amazonRes.store,
+      },
+      estimatedProfitPaise: null,
+    });
+  }
+
   const code = randomCode(8);
   // Requirement: Attach logged-in user's unique ID to the Cuelinks subid parameter
   const trackingSubId = body.subId || `${userId}_${code}`;

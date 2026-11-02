@@ -29,13 +29,20 @@ import {
   LoaderCircle,
   ToggleLeft,
   ToggleRight,
+  Upload,
+  FileSpreadsheet,
+  FileUp,
+  FileText,
+  X,
 } from "lucide-react";
 import { formatINR, safePaise } from "@/lib/money";
 import { BrandLogo } from "@/components/BrandLogo";
 
 export default function AdminPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"overview" | "deals" | "stores" | "withdrawals">("overview");
+  const [activeTab, setActiveTab] = useState<
+    "overview" | "deals" | "stores" | "withdrawals" | "amazon"
+  >("overview");
 
   const [data, setData] = useState<{
     stores: any[];
@@ -110,6 +117,25 @@ export default function AdminPage() {
     isActive: true,
   });
 
+  // Amazon Offline / CSV Sync state
+  const [amazonFile, setAmazonFile] = useState<File | null>(null);
+  const [amazonDragActive, setAmazonDragActive] = useState(false);
+  const [amazonUploading, setAmazonUploading] = useState(false);
+  const [amazonError, setAmazonError] = useState<string | null>(null);
+  const [amazonSummaryModalOpen, setAmazonSummaryModalOpen] = useState(false);
+  const [amazonSummary, setAmazonSummary] = useState<{
+    processedCount: number;
+    totalOrders: number;
+    totalItemPrice: number;
+    totalCommission: number;
+    totalUserProfit: number;
+    totalAdminCut: number;
+    orders?: any[];
+    message?: string;
+  } | null>(null);
+  const [csvPasteText, setCsvPasteText] = useState("");
+  const [showPasteArea, setShowPasteArea] = useState(false);
+
   async function refreshAdminData() {
     try {
       const res = await fetch("/api/admin/data");
@@ -145,6 +171,52 @@ export default function AdminPage() {
   function notify(msg: string) {
     setActionMsg(msg);
     setTimeout(() => setActionMsg(null), 3500);
+  }
+
+  // --- Amazon Offline CSV Sync Handler ---
+  async function handleAmazonUpload(e?: React.FormEvent) {
+    if (e) e.preventDefault();
+    if (!amazonFile && !csvPasteText.trim()) {
+      setAmazonError("Please choose a CSV file or paste CSV content.");
+      return;
+    }
+
+    setAmazonUploading(true);
+    setAmazonError(null);
+
+    try {
+      let res: Response;
+      if (amazonFile) {
+        const formData = new FormData();
+        formData.append("file", amazonFile);
+        res = await fetch("/api/admin/amazon-sync", {
+          method: "POST",
+          body: formData,
+        });
+      } else {
+        res = await fetch("/api/admin/amazon-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csvText: csvPasteText }),
+        });
+      }
+
+      const json = await res.json();
+      if (!res.ok) {
+        setAmazonError(json.error || "Failed to process Amazon CSV report.");
+      } else {
+        setAmazonSummary(json);
+        setAmazonSummaryModalOpen(true);
+        setAmazonFile(null);
+        setCsvPasteText("");
+        notify(`Reconciled ${json.processedCount} Amazon orders!`);
+        await refreshAdminData();
+      }
+    } catch (err: any) {
+      setAmazonError(err?.message || "An error occurred while uploading.");
+    } finally {
+      setAmazonUploading(false);
+    }
   }
 
   // --- Store Actions ---
@@ -356,6 +428,168 @@ export default function AdminPage() {
       : approvedCutPaise + pendingCutPaise
   );
 
+  function renderAmazonSyncSection() {
+    return (
+      <div className="overflow-hidden rounded-3xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-black/5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/5 pb-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200">
+              <FileSpreadsheet className="h-5 w-5" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-display font-extrabold text-base text-ink">
+                  Amazon Offline / CSV Sync
+                </h3>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                  ascsubtag Reconciler
+                </span>
+              </div>
+              <p className="text-xs text-ink-soft">
+                Upload Amazon Associates CSV report to reconcile orders and credit user earnings
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs font-bold">
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800 ring-1 ring-emerald-200">
+              70% User Cut
+            </span>
+            <span className="rounded-full bg-[#134024]/10 px-2.5 py-1 text-[#134024] ring-1 ring-[#134024]/20">
+              30% Platform Cut
+            </span>
+          </div>
+        </div>
+
+        {amazonError && (
+          <div className="flex items-center gap-2 rounded-2xl bg-red-50 p-3 text-xs text-red-700 ring-1 ring-red-200">
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
+            <span>{amazonError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleAmazonUpload} className="space-y-4">
+          {/* File Dropzone */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setAmazonDragActive(true);
+            }}
+            onDragLeave={() => setAmazonDragActive(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setAmazonDragActive(false);
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                setAmazonFile(e.dataTransfer.files[0]);
+                setAmazonError(null);
+              }
+            }}
+            className={`relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition cursor-pointer ${
+              amazonDragActive
+                ? "border-amber-500 bg-amber-50/50"
+                : amazonFile
+                ? "border-emerald-500 bg-emerald-50/30"
+                : "border-black/15 bg-canvas/40 hover:bg-canvas"
+            }`}
+            onClick={() => {
+              const fileInput = document.getElementById("amazon-csv-input");
+              if (fileInput) fileInput.click();
+            }}
+          >
+            <input
+              id="amazon-csv-input"
+              type="file"
+              accept=".csv,.txt,.tsv"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  setAmazonFile(e.target.files[0]);
+                  setAmazonError(null);
+                }
+              }}
+            />
+
+            {amazonFile ? (
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="h-8 w-8 text-emerald-600" />
+                <div className="text-left">
+                  <p className="text-xs font-bold text-ink">{amazonFile.name}</p>
+                  <p className="text-[10px] text-ink-soft">
+                    {(amazonFile.size / 1024).toFixed(1)} KB • Ready to reconcile
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    setAmazonFile(null);
+                  }}
+                  className="rounded-full p-1 text-ink-soft hover:bg-black/10"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <FileUp className="h-8 w-8 text-amber-600 mb-2" />
+                <p className="text-xs font-bold text-ink">
+                  Drag & drop Amazon Associates CSV here, or{" "}
+                  <span className="text-[#169443] underline">browse file</span>
+                </p>
+                <p className="text-[10px] text-ink-soft mt-1">
+                  Expected columns: Tracking Tag / ascsubtag, Item Price, Advertising Fee (Commission), Date
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Toggle Raw Paste Option */}
+          <div className="flex items-center justify-between text-xs">
+            <button
+              type="button"
+              onClick={() => setShowPasteArea(!showPasteArea)}
+              className="text-ink-soft hover:text-ink font-semibold flex items-center gap-1"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              {showPasteArea ? "Hide raw CSV paste" : "Or paste CSV text directly"}
+            </button>
+            <span className="text-[10px] text-ink-faint">Amazon Associates Report v2.1</span>
+          </div>
+
+          {showPasteArea && (
+            <textarea
+              rows={4}
+              value={csvPasteText}
+              onChange={(e) => setCsvPasteText(e.target.value)}
+              placeholder="Paste raw CSV content here (Tracking Tag / ascsubtag, Item Price, Advertising Fee, Date)..."
+              className="w-full rounded-2xl bg-canvas p-3 text-xs font-mono outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-amber-500"
+            />
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <button
+              type="submit"
+              disabled={amazonUploading || (!amazonFile && !csvPasteText.trim())}
+              className="flex items-center gap-2 rounded-full bg-[#134024] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#169443] transition active:scale-95 disabled:opacity-50 shadow-md"
+            >
+              {amazonUploading ? (
+                <>
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  <span>Processing Amazon CSV...</span>
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  <span>Upload & Reconcile CSV</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pt-2 pb-16 max-w-4xl mx-auto px-3 sm:px-4">
       {/* Top Admin Header */}
@@ -441,6 +675,18 @@ export default function AdminPage() {
         >
           <CreditCard className="h-4 w-4" /> Withdrawal Requests (
           {data.withdrawals.filter((w) => w.status === "REQUESTED").length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab("amazon")}
+          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
+            activeTab === "amazon"
+              ? "bg-[#134024] text-white shadow-sm"
+              : "text-ink-soft hover:bg-canvas hover:text-ink"
+          }`}
+        >
+          <FileSpreadsheet className="h-4 w-4 text-amber-500" /> Amazon CSV Sync
         </button>
       </div>
 
@@ -631,6 +877,9 @@ export default function AdminPage() {
               </div>
             )}
           </div>
+
+          {/* Amazon Offline / CSV Sync Section */}
+          {renderAmazonSyncSection()}
         </div>
       )}
 
@@ -938,6 +1187,13 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* TAB 5: AMAZON OFFLINE / CSV SYNC */}
+      {activeTab === "amazon" && (
+        <div className="space-y-6 animate-in fade-in">
+          {renderAmazonSyncSection()}
+        </div>
+      )}
+
       {/* MODAL: ADD DEAL WITH OFFER TAG & DESTINATION URL */}
       {dealModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -1156,6 +1412,116 @@ export default function AdminPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: AMAZON CSV RECONCILE SUMMARY */}
+      {amazonSummaryModalOpen && amazonSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-black/5 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-100 text-[#169443]">
+                  <CheckCircle2 className="h-6 w-6" />
+                </span>
+                <div>
+                  <h3 className="font-display font-extrabold text-base text-ink">
+                    Amazon CSV Report Reconciled
+                  </h3>
+                  <p className="text-[11px] text-[#169443] font-bold">
+                    Processed {amazonSummary.processedCount} orders, Total User Profit: ₹{amazonSummary.totalUserProfit.toFixed(2)}, Admin Cut: ₹{amazonSummary.totalAdminCut.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAmazonSummaryModalOpen(false)}
+                className="rounded-full p-1.5 text-ink-soft hover:bg-canvas"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="my-4 space-y-4">
+              {/* Highlight Banner */}
+              <div className="rounded-2xl bg-gradient-to-tr from-[#134024] via-[#1a5530] to-[#169443] p-4 text-white shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+                  Reconciliation Complete
+                </p>
+                <p className="font-display text-lg font-black text-white mt-0.5">
+                  Processed {amazonSummary.processedCount} orders, Total User Profit: ₹{amazonSummary.totalUserProfit.toFixed(2)}, Admin Cut: ₹{amazonSummary.totalAdminCut.toFixed(2)}
+                </p>
+                <p className="text-xs text-white/80 mt-1">
+                  ascsubtags matched to user link clicks. Balances and platform cuts dynamically credited.
+                </p>
+              </div>
+
+              {/* 3 Metric Cards */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-2xl bg-canvas p-3 ring-1 ring-black/5">
+                  <p className="text-[10px] font-bold uppercase text-ink-faint">Orders</p>
+                  <p className="num font-display text-xl font-black text-ink mt-0.5">
+                    {amazonSummary.processedCount}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-200">
+                  <p className="text-[10px] font-bold uppercase text-emerald-800">User Profit (70%)</p>
+                  <p className="num font-display text-xl font-black text-[#169443] mt-0.5">
+                    ₹{amazonSummary.totalUserProfit.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-200">
+                  <p className="text-[10px] font-bold uppercase text-amber-800">Admin Cut (30%)</p>
+                  <p className="num font-display text-xl font-black text-amber-700 mt-0.5">
+                    ₹{amazonSummary.totalAdminCut.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Orders Detail Table if available */}
+              {amazonSummary.orders && amazonSummary.orders.length > 0 && (
+                <div className="overflow-hidden rounded-2xl border border-black/5">
+                  <div className="bg-canvas px-3 py-2 text-[10px] font-bold uppercase text-ink-faint flex items-center justify-between">
+                    <span>Matched Orders ({amazonSummary.orders.length})</span>
+                    <span>Allocations</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto divide-y divide-black/5 text-xs">
+                    {amazonSummary.orders.map((o: any, idx: number) => (
+                      <div key={idx} className="flex items-center justify-between p-2.5 hover:bg-canvas/40">
+                        <div>
+                          <p className="font-bold text-ink flex items-center gap-1.5">
+                            <span>{o.orderId}</span>
+                            <span className="rounded-full bg-black/5 px-1.5 py-0.2 text-[9px] text-ink-soft font-mono">
+                              {o.ascsubtag}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-ink-soft">
+                            Sale: ₹{o.itemPrice.toFixed(2)} • Gross Fee: ₹{o.commission.toFixed(2)}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-bold text-[#169443]">
+                            +₹{o.userProfit.toFixed(2)}
+                          </p>
+                          <p className="text-[10px] text-amber-700 font-medium">
+                            Cut: ₹{o.adminCut.toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAmazonSummaryModalOpen(false)}
+              className="w-full rounded-full bg-[#134024] py-2.5 text-xs font-bold text-white hover:bg-[#169443] transition shadow-md active:scale-95"
+            >
+              Done & Refresh Metrics
+            </button>
           </div>
         </div>
       )}

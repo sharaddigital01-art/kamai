@@ -447,6 +447,8 @@ export interface MockLink {
   createdAt: Date;
   store: { name: string; slug?: string };
   deal?: { title: string } | null;
+  provider?: string;
+  clickRefId?: string;
 }
 
 export interface MockLedgerRow {
@@ -785,6 +787,20 @@ export function getMockLinkByCode(code: string): MockLink | undefined {
   return g.mockLinks!.get(code);
 }
 
+export function getMockLinkByClickRefId(clickRefId: string): MockLink | undefined {
+  if (!g.mockLinks || !clickRefId) return undefined;
+  for (const link of g.mockLinks.values()) {
+    if (
+      link.clickRefId === clickRefId ||
+      link.subId === clickRefId ||
+      link.code === clickRefId
+    ) {
+      return link;
+    }
+  }
+  return undefined;
+}
+
 // Clicks Tracker: Real dynamic counting
 export function incrementMockLinkClick(
   code: string,
@@ -906,6 +922,79 @@ export function recordCuelinksPostback(data: {
     row: ledgerRow,
     balances: g.mockBalances,
     adminRevenuePaise: (g as any).adminRevenuePaise,
+  };
+}
+
+export function recordAmazonConversion(data: {
+  txId: string;
+  userId?: string | null;
+  subId: string;
+  itemPricePaise: number;
+  commissionPaise: number;
+  userProfitPaise: number;
+  adminCutPaise: number;
+  status: "PENDING" | "CONFIRMED" | "REJECTED";
+  date?: Date;
+}) {
+  if (!g.mockBalances) {
+    g.mockBalances = { pending: 0, available: 0, inWithdrawal: 0, paid: 0, lifetime: 0 };
+  }
+  if (!g.mockLedger) g.mockLedger = [];
+  if (!g.mockConversions) g.mockConversions = new Map();
+
+  const txDate = data.date || new Date();
+  const effectiveUserId = data.userId || DEMO_USER.id;
+
+  const ledgerRow: MockLedgerRow = {
+    id: data.txId,
+    store: { name: "Amazon" },
+    externalOrderId: data.txId,
+    orderAmountPaise: data.itemPricePaise,
+    userAmountPaise: data.userProfitPaise,
+    status: data.status,
+    createdAt: txDate,
+  };
+
+  const existingIdx = g.mockLedger.findIndex((l) => l.externalOrderId === data.txId);
+  if (existingIdx >= 0) {
+    const prev = g.mockLedger[existingIdx]!;
+    if (prev.status === "CONFIRMED") {
+      g.mockBalances.available = Math.max(0, g.mockBalances.available - prev.userAmountPaise);
+      g.mockBalances.lifetime = Math.max(0, g.mockBalances.lifetime - prev.userAmountPaise);
+    } else if (prev.status === "PENDING") {
+      g.mockBalances.pending = Math.max(0, g.mockBalances.pending - prev.userAmountPaise);
+      g.mockBalances.lifetime = Math.max(0, g.mockBalances.lifetime - prev.userAmountPaise);
+    }
+    g.mockLedger[existingIdx] = ledgerRow;
+  } else {
+    g.mockLedger.unshift(ledgerRow);
+  }
+
+  if (data.status === "CONFIRMED") {
+    g.mockBalances.available += data.userProfitPaise;
+    g.mockBalances.lifetime += data.userProfitPaise;
+  } else if (data.status === "PENDING") {
+    g.mockBalances.pending += data.userProfitPaise;
+    g.mockBalances.lifetime += data.userProfitPaise;
+  }
+
+  // Also add to mockConversions so admin overview metrics see it
+  g.mockConversions.set(data.txId, {
+    id: data.txId,
+    transactionId: data.txId,
+    storeName: "Amazon",
+    saleAmount: data.itemPricePaise / 100,
+    commission: data.commissionPaise / 100,
+    status: data.status.toLowerCase(),
+    subid: data.subId,
+    userId: effectiveUserId,
+    createdAt: txDate,
+    updatedAt: new Date(),
+  });
+
+  return {
+    row: ledgerRow,
+    balances: g.mockBalances,
   };
 }
 
