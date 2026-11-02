@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { safePaise, safeCommissionPaise } from "@/lib/money";
 import {
   isDatabaseConfigured,
   getUserBalances,
@@ -503,17 +504,20 @@ async function handleReports(req: Request) {
         }).length
       );
 
-      // Period profit
+      // Period profit: dynamically sum all valid non-rejected earnings in this date range
       const periodLedgerProfit = filteredLedgerRows
-        .filter((r) => r.status === "CONFIRMED" || r.status === "PAID")
-        .reduce((sum, r) => sum + (r.userAmountPaise || 0), 0);
+        .filter((r) => {
+          const st = String(r.status || "").toUpperCase();
+          return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
+        })
+        .reduce((sum, r) => sum + safePaise(r.userAmountPaise), 0);
 
       const periodConvProfit = filteredConversions
         .filter((c) => {
           const st = String(c.status || "").toLowerCase();
-          return st === "paid" || st === "confirmed" || st === "approved";
+          return st !== "rejected" && st !== "cancelled" && st !== "failed";
         })
-        .reduce((sum, c) => sum + Math.round((c.commission || 0) * 100), 0);
+        .reduce((sum, c) => sum + safeCommissionPaise(c.commission), 0);
 
       periodProfitPaise =
         queryRange === "all"
@@ -766,23 +770,32 @@ async function handleReports(req: Request) {
 
     totalTxns = Math.max(
       filteredConversions.filter(
-        (c) => String(c.status).toLowerCase() !== "rejected"
+        (c) => {
+          const st = String(c.status || "").toLowerCase();
+          return st !== "rejected" && st !== "cancelled" && st !== "failed";
+        }
       ).length,
       filteredLedger.filter(
-        (l) => l.status === "CONFIRMED" || l.status === "PAID"
+        (l) => {
+          const st = String(l.status || "").toUpperCase();
+          return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
+        }
       ).length
     );
 
     const periodLedgerProfit = filteredLedger
-      .filter((l) => l.status === "CONFIRMED" || l.status === "PAID")
-      .reduce((sum, l) => sum + (l.userAmountPaise || 0), 0);
+      .filter((l) => {
+        const st = String(l.status || "").toUpperCase();
+        return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
+      })
+      .reduce((sum, l) => sum + safePaise(l.userAmountPaise), 0);
 
     const periodConvProfit = filteredConversions
       .filter((c) => {
         const st = String(c.status || "").toLowerCase();
-        return st === "confirmed" || st === "paid" || st === "approved";
+        return st !== "rejected" && st !== "cancelled" && st !== "failed";
       })
-      .reduce((sum, c) => sum + Math.round((c.commission || 0) * 100), 0);
+      .reduce((sum, c) => sum + safeCommissionPaise(c.commission), 0);
 
     periodProfitPaise =
       queryRange === "all"

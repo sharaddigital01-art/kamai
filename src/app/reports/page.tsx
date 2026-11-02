@@ -20,7 +20,7 @@ import {
   Sparkles,
   ArrowUpRight,
 } from "lucide-react";
-import { formatINR } from "@/lib/money";
+import { formatINR, safePaise, safeCommissionPaise } from "@/lib/money";
 import { BrandLogo } from "@/components/BrandLogo";
 import {
   getCachedReportsData,
@@ -204,7 +204,6 @@ export default function ReportsPage() {
 
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [simulating, setSimulating] = useState(false);
 
   async function loadData(
     forceBypass = false,
@@ -330,29 +329,6 @@ export default function ReportsPage() {
     }
   }
 
-  async function triggerSimulation() {
-    setSimulating(true);
-    try {
-      const res = await fetch("/api/admin/simulate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "conversion",
-          storeSlug: "flipkart",
-          orderAmountPaise: 189900,
-          userAmountPaise: 14242,
-        }),
-      });
-      if (res.ok) {
-        await loadData(true, undefined, period);
-      }
-    } catch {
-      //
-    } finally {
-      setSimulating(false);
-    }
-  }
-
   // Dynamic chart data based on live clicks/orders
   const baseClicks = stats.totalClicks;
   const baseOrders = stats.totalTransactions;
@@ -437,7 +413,7 @@ export default function ReportsPage() {
       profit: 0,
     };
     existing.txns += 1;
-    existing.profit += row.userAmountPaise || 0;
+    existing.profit += safePaise(row.userAmountPaise);
     brandStatsMap.set(storeSlug, existing);
   }
 
@@ -446,13 +422,10 @@ export default function ReportsPage() {
     const storeSlug =
       (conv.storeName || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
       "general";
-    const isApproved =
-      conv.status === "PAID" ||
-      conv.status === "CONFIRMED" ||
-      conv.status === "confirmed";
-    const profitPaise = isApproved
-      ? Math.round((conv.commission || 0) * 100)
-      : 0;
+    const st = String(conv.status || "").toLowerCase();
+    const isNotRejected =
+      st !== "rejected" && st !== "cancelled" && st !== "failed";
+    const profitPaise = isNotRejected ? safeCommissionPaise(conv.commission) : 0;
 
     if (!brandStatsMap.has(storeSlug)) {
       brandStatsMap.set(storeSlug, {
@@ -464,16 +437,32 @@ export default function ReportsPage() {
     }
   }
 
+  // Calculate sum of brand profits and total transactions
+  const totalBrandProfit = Array.from(brandStatsMap.values()).reduce(
+    (sum, b) => sum + (safePaise(b.profit) || 0),
+    0
+  );
+  const totalBrandTxns = Math.max(
+    stats.totalTransactions,
+    Array.from(brandStatsMap.values()).reduce((sum, b) => sum + (b.txns || 0), 0)
+  );
+
+  // The actual profit to display on the PROFIT card and TOTAL table row
+  const displayProfitPaise = Math.max(
+    safePaise(stats.totalProfitPaise),
+    totalBrandProfit
+  );
+
   const brandRows =
     brandStatsMap.size > 0
       ? Array.from(brandStatsMap.values())
-      : stats.totalTransactions > 0
+      : totalBrandTxns > 0
       ? [
           {
             name: "Flipkart",
             slug: "flipkart",
-            txns: stats.totalTransactions,
-            profit: stats.totalProfitPaise,
+            txns: totalBrandTxns,
+            profit: displayProfitPaise,
           },
           { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
           { name: "Ajio", slug: "ajio", txns: 0, profit: 0 },
@@ -719,7 +708,7 @@ export default function ReportsPage() {
               Profit
             </p>
             <p className="num font-display text-xl font-black text-ink">
-              {formatINR(stats.totalProfitPaise)}
+              {formatINR(displayProfitPaise)}
             </p>
           </div>
 
@@ -904,23 +893,6 @@ export default function ReportsPage() {
             ))}
           </div>
         </div>
-
-        {/* Live Simulation Quick Button */}
-        <div className="mt-5 border-t border-black/5 pt-3.5 flex items-center justify-between">
-          <p className="text-[11px] text-ink-soft">
-            Testing conversions? Click below to simulate a real order
-            conversion:
-          </p>
-          <button
-            type="button"
-            disabled={simulating}
-            onClick={triggerSimulation}
-            className="flex items-center gap-1 rounded-full bg-[#134024] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#169443] transition active:scale-95 disabled:opacity-50"
-          >
-            <Sparkles className="h-3 w-3 text-emerald-300" />
-            {simulating ? "Crediting..." : "+ Simulate ₹142.42 Profit"}
-          </button>
-        </div>
       </div>
 
       {/* 4. Performance by All Brands Data Table */}
@@ -977,10 +949,10 @@ export default function ReportsPage() {
               <tr className="bg-emerald-50/50 font-black text-ink border-t border-black/10">
                 <td className="py-3 px-4 uppercase text-[11px]">Total</td>
                 <td className="py-3 px-2 text-center">
-                  {stats.totalTransactions}
+                  {totalBrandTxns}
                 </td>
                 <td className="num py-3 px-3 text-right text-[#169443]">
-                  {formatINR(stats.totalProfitPaise)}
+                  {formatINR(displayProfitPaise)}
                 </td>
                 <td className="num py-3 px-4 text-right">
                   {stats.convRate || displayConvRate}

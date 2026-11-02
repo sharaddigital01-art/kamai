@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { formatINR, safePaise, safeCommissionPaise } from "./money";
 import {
   fetchCuelinksTransactions,
   syncCuelinksTransactions,
@@ -250,6 +251,18 @@ describe("SubId Stats Fetching & Instant Click Tracking", () => {
       const expectedConv =
         clicks > 0 ? `${((orders / clicks) * 100).toFixed(2)}%` : "0.0%";
       expect(json.stats.convRate).toBe(expectedConv);
+    });
+
+    it("parses currency strings properly so ₹27.83 and numeric strings do not evaluate to 0 or NaN", () => {
+      expect(safePaise("₹27.83")).toBe(2783);
+      expect(safePaise("27.83")).toBe(2783);
+      expect(safePaise("2783")).toBe(2783);
+      expect(safePaise(2783)).toBe(2783);
+      expect(safeCommissionPaise("₹27.83")).toBe(2783);
+      expect(safeCommissionPaise("27.83")).toBe(2783);
+      expect(safeCommissionPaise(27.83)).toBe(2783);
+      expect(formatINR(2783)).toBe("₹27.83");
+      expect(formatINR("₹27.83")).toBe("₹27.83");
     });
   });
 
