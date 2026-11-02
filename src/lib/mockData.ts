@@ -1158,12 +1158,15 @@ export function getAdminPlatformOverview() {
   const totalConvertedLinks = g.mockLinks ? g.mockLinks.size : 0;
 
   // Strict formula: admin_revenue = SUM(affiliate_commission * 0.30)
-  // Ensure it is NOT calculating 30% of total product order value.
+  // Segmented by status: approved, pending, rejected
   // Wipes/excludes all simulated/test transaction rows and seed accounts.
-  let platformRevenuePaise = 0;
+  let pendingCutPaise = 0;
+  let approvedCutPaise = 0;
+  let rejectedCutPaise = 0;
+
   if (g.mockConversions) {
     const seedIds = new Set([DEMO_USER.id, ADMIN_USER_ID]);
-    const realApproved = Array.from(g.mockConversions.values()).filter((c) => {
+    const realConversions = Array.from(g.mockConversions.values()).filter((c) => {
       if (c.userId && seedIds.has(c.userId)) return false;
       if ((c as any).is_test === true || (c as any).isTest === true) return false;
       const tx = String(c.transactionId || "").toLowerCase();
@@ -1176,15 +1179,32 @@ export function getAdminPlatformOverview() {
       ) {
         return false;
       }
-      const st = String(c.status || "").toLowerCase();
-      return st === "confirmed" || st === "approved" || st === "paid";
+      return true;
     });
 
-    platformRevenuePaise = realApproved.reduce((sum, c) => {
+    for (const c of realConversions) {
       const commRupees = Number(c.commission) || 0;
-      return sum + Math.round(commRupees * 100 * 0.30);
-    }, 0);
+      const cutPaise = Math.round(commRupees * 100 * 0.30);
+      const st = String(c.status || "").toLowerCase().trim();
+
+      if (st === "approved" || st === "confirmed" || st === "paid") {
+        approvedCutPaise += cutPaise;
+      } else if (st === "pending" || st === "open" || st === "0") {
+        pendingCutPaise += cutPaise;
+      } else if (
+        st === "rejected" ||
+        st === "cancelled" ||
+        st === "canceled" ||
+        st === "failed" ||
+        st === "declined" ||
+        st === "2"
+      ) {
+        rejectedCutPaise += cutPaise;
+      }
+    }
   }
+
+  const totalPlatformRevenuePaise = approvedCutPaise + pendingCutPaise;
 
   const withdrawals = getLiveWithdrawals();
   const pendingPayoutsPaise = withdrawals
@@ -1194,7 +1214,18 @@ export function getAdminPlatformOverview() {
   return {
     totalRegisteredUsers: registeredUsersCount,
     totalConvertedLinks,
-    totalPlatformRevenuePaise: platformRevenuePaise,
+    totalPlatformRevenuePaise,
+    totalPlatformRevenue: totalPlatformRevenuePaise / 100,
+    total_admin_revenue: totalPlatformRevenuePaise / 100,
+    pendingCutPaise,
+    pendingCut: pendingCutPaise / 100,
+    pending_admin_cut: pendingCutPaise / 100,
+    approvedCutPaise,
+    approvedCut: approvedCutPaise / 100,
+    approved_admin_cut: approvedCutPaise / 100,
+    rejectedCutPaise,
+    rejectedCut: rejectedCutPaise / 100,
+    rejected_admin_cut: rejectedCutPaise / 100,
     pendingPayoutsPaise,
   };
 }

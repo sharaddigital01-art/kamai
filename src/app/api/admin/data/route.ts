@@ -26,10 +26,21 @@ export async function GET() {
   let stores = getLiveStores();
   let deals = getLiveDeals();
   let withdrawals: any[] = getLiveWithdrawals();
-  let stats = {
+  let stats: Record<string, any> = {
     totalRegisteredUsers: 1,
     totalConvertedLinks: 0,
     totalPlatformRevenuePaise: 0,
+    totalPlatformRevenue: 0,
+    total_admin_revenue: 0,
+    pendingCutPaise: 0,
+    pendingCut: 0,
+    pending_admin_cut: 0,
+    approvedCutPaise: 0,
+    approvedCut: 0,
+    approved_admin_cut: 0,
+    rejectedCutPaise: 0,
+    rejectedCut: 0,
+    rejected_admin_cut: 0,
     pendingPayoutsPaise: 0,
   };
   let recentClicks: any[] = getLiveClicks().slice(0, 30);
@@ -161,10 +172,10 @@ export async function GET() {
       const totalLinks = await prisma.generatedLink.count();
 
       // Calculation formula strictly: admin_revenue = SUM(affiliate_commission * 0.30)
-      // (Ensure it is NOT calculating 30% of total product order value / saleAmount)
-      const approvedConversions = await prisma.conversion.findMany({
+      // Segmented by status: approved, pending, rejected
+      // Ensure it is NOT calculating 30% of total product order value (saleAmount)
+      const realConversions = await prisma.conversion.findMany({
         where: {
-          status: { in: ["confirmed", "approved", "paid", "CONFIRMED", "PAID"] },
           userId: { notIn: excludeUserIds },
           transactionId: {
             not: { startsWith: "test" },
@@ -172,13 +183,36 @@ export async function GET() {
         },
         select: {
           commission: true,
+          status: true,
         },
       });
 
-      const platformRev = approvedConversions.reduce((sum, c) => {
+      let pendingCutPaise = 0;
+      let approvedCutPaise = 0;
+      let rejectedCutPaise = 0;
+
+      for (const c of realConversions) {
         const commRupees = Number(c.commission) || 0;
-        return sum + Math.round(commRupees * 100 * 0.30);
-      }, 0);
+        const cutPaise = Math.round(commRupees * 100 * 0.30);
+        const st = String(c.status || "").toLowerCase().trim();
+
+        if (st === "approved" || st === "confirmed" || st === "paid") {
+          approvedCutPaise += cutPaise;
+        } else if (st === "pending" || st === "open" || st === "0") {
+          pendingCutPaise += cutPaise;
+        } else if (
+          st === "rejected" ||
+          st === "cancelled" ||
+          st === "canceled" ||
+          st === "failed" ||
+          st === "declined" ||
+          st === "2"
+        ) {
+          rejectedCutPaise += cutPaise;
+        }
+      }
+
+      const totalPlatformRevenuePaise = approvedCutPaise + pendingCutPaise;
 
       const pendingAggregate = await prisma.withdrawal.aggregate({
         where: {
@@ -192,7 +226,18 @@ export async function GET() {
       stats = {
         totalRegisteredUsers: Math.max(1, totalUsers),
         totalConvertedLinks: totalLinks,
-        totalPlatformRevenuePaise: platformRev,
+        totalPlatformRevenuePaise,
+        totalPlatformRevenue: totalPlatformRevenuePaise / 100,
+        total_admin_revenue: totalPlatformRevenuePaise / 100,
+        pendingCutPaise,
+        pendingCut: pendingCutPaise / 100,
+        pending_admin_cut: pendingCutPaise / 100,
+        approvedCutPaise,
+        approvedCut: approvedCutPaise / 100,
+        approved_admin_cut: approvedCutPaise / 100,
+        rejectedCutPaise,
+        rejectedCut: rejectedCutPaise / 100,
+        rejected_admin_cut: rejectedCutPaise / 100,
         pendingPayoutsPaise: pendingPaise,
       };
 

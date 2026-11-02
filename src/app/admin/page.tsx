@@ -30,7 +30,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import { formatINR } from "@/lib/money";
+import { formatINR, safePaise } from "@/lib/money";
 import { BrandLogo } from "@/components/BrandLogo";
 
 export default function AdminPage() {
@@ -45,6 +45,17 @@ export default function AdminPage() {
       totalRegisteredUsers: number;
       totalConvertedLinks: number;
       totalPlatformRevenuePaise: number;
+      totalPlatformRevenue?: number;
+      total_admin_revenue?: number;
+      pendingCutPaise?: number;
+      pendingCut?: number;
+      pending_admin_cut?: number;
+      approvedCutPaise?: number;
+      approvedCut?: number;
+      approved_admin_cut?: number;
+      rejectedCutPaise?: number;
+      rejectedCut?: number;
+      rejected_admin_cut?: number;
       pendingPayoutsPaise: number;
     };
     recentClicks: any[];
@@ -57,6 +68,9 @@ export default function AdminPage() {
       totalRegisteredUsers: 1,
       totalConvertedLinks: 0,
       totalPlatformRevenuePaise: 0,
+      pendingCutPaise: 0,
+      approvedCutPaise: 0,
+      rejectedCutPaise: 0,
       pendingPayoutsPaise: 0,
     },
     recentClicks: [],
@@ -304,6 +318,37 @@ export default function AdminPage() {
     );
   }
 
+  const approvedCutPaise = safePaise(
+    data.stats.approvedCutPaise ??
+      (data.stats.approvedCut !== undefined
+        ? Math.round(Number(data.stats.approvedCut) * 100)
+        : data.stats.approved_admin_cut !== undefined
+        ? Math.round(Number(data.stats.approved_admin_cut) * 100)
+        : data.stats.totalPlatformRevenuePaise)
+  );
+
+  const pendingCutPaise = safePaise(
+    data.stats.pendingCutPaise ??
+      (data.stats.pendingCut !== undefined
+        ? Math.round(Number(data.stats.pendingCut) * 100)
+        : data.stats.pending_admin_cut !== undefined
+        ? Math.round(Number(data.stats.pending_admin_cut) * 100)
+        : 0)
+  );
+
+  const rejectedCutPaise = safePaise(
+    data.stats.rejectedCutPaise ??
+      (data.stats.rejectedCut !== undefined
+        ? Math.round(Number(data.stats.rejectedCut) * 100)
+        : data.stats.rejected_admin_cut !== undefined
+        ? Math.round(Number(data.stats.rejected_admin_cut) * 100)
+        : 0)
+  );
+
+  const totalCutPaise = safePaise(
+    data.stats.totalPlatformRevenuePaise || approvedCutPaise + pendingCutPaise
+  );
+
   return (
     <div className="space-y-6 pt-2 pb-16 max-w-4xl mx-auto px-3 sm:px-4">
       {/* Top Admin Header */}
@@ -425,14 +470,22 @@ export default function AdminPage() {
 
             {/* KPI 3: Total Platform Revenue (30% retained cut) */}
             <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-[#169443]">
-                <Coins className="h-4 w-4" />
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-[#169443]">
+                  <Coins className="h-4 w-4" />
+                </span>
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-800">
+                  30% Cut
+                </span>
+              </div>
               <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
                 Platform Revenue (30% Cut)
               </p>
               <p className="num font-display text-2xl font-black text-[#169443] mt-0.5">
-                {formatINR(data.stats.totalPlatformRevenuePaise || 0)}
+                {formatINR(totalCutPaise)}
+              </p>
+              <p className="text-[10px] font-medium text-emerald-700 mt-1 flex items-center gap-1">
+                <span>Realized:</span> <span className="font-bold">{formatINR(approvedCutPaise)}</span>
               </p>
             </div>
 
@@ -447,6 +500,96 @@ export default function AdminPage() {
               <p className="num font-display text-2xl font-black text-amber-600 mt-0.5">
                 {formatINR(data.stats.pendingPayoutsPaise || 0)}
               </p>
+            </div>
+          </div>
+
+          {/* Detailed Revenue Status Breakdown Card (Highlighted Green, matching User Dashboard Design) */}
+          <div className="overflow-hidden rounded-3xl bg-gradient-to-tr from-[#134024] via-[#1a5530] to-[#169443] p-5 sm:p-6 text-white shadow-md">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/15 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 text-white ring-2 ring-white/30 shadow-inner">
+                  <Coins className="h-5 w-5 text-emerald-300" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-display text-base font-extrabold text-white">
+                      Platform Revenue Breakdown
+                    </h2>
+                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-200">
+                      30% Retained Cut
+                    </span>
+                  </div>
+                  <p className="text-xs text-white/80">
+                    Live platform revenue segmented across affiliate order statuses
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-left sm:text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+                  Total Platform Cut (30%)
+                </p>
+                <p className="num font-display text-2xl sm:text-3xl font-black text-white">
+                  {formatINR(totalCutPaise)}
+                </p>
+              </div>
+            </div>
+
+            {/* Status Sub-Cards / Pills */}
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* ⏳ Pending Cut (In Return Window) */}
+              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                    <Clock className="h-3.5 w-3.5" /> ⏳ Pending Cut
+                  </span>
+                  <span className="rounded-full bg-amber-400/25 px-2 py-0.5 text-[9px] font-bold text-amber-200">
+                    In Return Window
+                  </span>
+                </div>
+                <p className="num font-display text-2xl font-black text-amber-300 mt-2">
+                  {formatINR(pendingCutPaise)}
+                </p>
+                <p className="text-[10px] text-white/70 mt-1">
+                  Commissions currently in 30-90 day return & merchant verification window.
+                </p>
+              </div>
+
+              {/* ✅ Approved / Realized Cut */}
+              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> ✅ Approved Cut
+                  </span>
+                  <span className="rounded-full bg-emerald-400/25 px-2 py-0.5 text-[9px] font-bold text-emerald-200">
+                    Realized
+                  </span>
+                </div>
+                <p className="num font-display text-2xl font-black text-white mt-2">
+                  {formatINR(approvedCutPaise)}
+                </p>
+                <p className="text-[10px] text-white/70 mt-1">
+                  Cleared earnings ready & deposited into platform accounts.
+                </p>
+              </div>
+
+              {/* ❌ Rejected / Cancelled Cut */}
+              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
+                    <XCircle className="h-3.5 w-3.5" /> ❌ Rejected Cut
+                  </span>
+                  <span className="rounded-full bg-rose-400/25 px-2 py-0.5 text-[9px] font-bold text-rose-200">
+                    Cancelled
+                  </span>
+                </div>
+                <p className="num font-display text-2xl font-black text-rose-300 mt-2">
+                  {formatINR(rejectedCutPaise)}
+                </p>
+                <p className="text-[10px] text-white/70 mt-1">
+                  Cancelled or returned customer orders excluded from payout.
+                </p>
+              </div>
             </div>
           </div>
 
