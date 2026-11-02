@@ -318,35 +318,42 @@ export default function AdminPage() {
     );
   }
 
+  // Directly bind from API response fields; paise fields are primary, rupee fields as fallback.
+  // Avoid the incorrect fallback to totalPlatformRevenuePaise for approvedCut when it's genuinely 0.
   const approvedCutPaise = safePaise(
-    data.stats.approvedCutPaise ??
-      (data.stats.approvedCut !== undefined
-        ? Math.round(Number(data.stats.approvedCut) * 100)
-        : data.stats.approved_admin_cut !== undefined
-        ? Math.round(Number(data.stats.approved_admin_cut) * 100)
-        : data.stats.totalPlatformRevenuePaise)
+    data.stats.approvedCutPaise != null
+      ? data.stats.approvedCutPaise
+      : data.stats.approvedCut != null
+      ? Math.round(Number(data.stats.approvedCut) * 100)
+      : data.stats.approved_admin_cut != null
+      ? Math.round(Number(data.stats.approved_admin_cut) * 100)
+      : 0
   );
 
   const pendingCutPaise = safePaise(
-    data.stats.pendingCutPaise ??
-      (data.stats.pendingCut !== undefined
-        ? Math.round(Number(data.stats.pendingCut) * 100)
-        : data.stats.pending_admin_cut !== undefined
-        ? Math.round(Number(data.stats.pending_admin_cut) * 100)
-        : 0)
+    data.stats.pendingCutPaise != null
+      ? data.stats.pendingCutPaise
+      : data.stats.pendingCut != null
+      ? Math.round(Number(data.stats.pendingCut) * 100)
+      : data.stats.pending_admin_cut != null
+      ? Math.round(Number(data.stats.pending_admin_cut) * 100)
+      : 0
   );
 
   const rejectedCutPaise = safePaise(
-    data.stats.rejectedCutPaise ??
-      (data.stats.rejectedCut !== undefined
-        ? Math.round(Number(data.stats.rejectedCut) * 100)
-        : data.stats.rejected_admin_cut !== undefined
-        ? Math.round(Number(data.stats.rejected_admin_cut) * 100)
-        : 0)
+    data.stats.rejectedCutPaise != null
+      ? data.stats.rejectedCutPaise
+      : data.stats.rejectedCut != null
+      ? Math.round(Number(data.stats.rejectedCut) * 100)
+      : data.stats.rejected_admin_cut != null
+      ? Math.round(Number(data.stats.rejected_admin_cut) * 100)
+      : 0
   );
 
   const totalCutPaise = safePaise(
-    data.stats.totalPlatformRevenuePaise || approvedCutPaise + pendingCutPaise
+    data.stats.totalPlatformRevenuePaise != null && data.stats.totalPlatformRevenuePaise > 0
+      ? data.stats.totalPlatformRevenuePaise
+      : approvedCutPaise + pendingCutPaise
   );
 
   return (

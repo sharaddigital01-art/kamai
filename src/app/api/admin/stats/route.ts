@@ -91,18 +91,16 @@ export async function GET() {
       });
       const totalLinks = await prisma.generatedLink.count();
 
-      // Calculation formula strictly: admin_revenue = SUM(affiliate_commission * 0.30)
-      // Segmented by status: approved, pending, rejected
-      // Ensure it is NOT calculating 30% of total product order value (saleAmount)
-      const realConversions = await prisma.conversion.findMany({
+      // PRIMARY: Aggregate admin 30% cut from EarningsLedger.commissionPaise
+      // commissionPaise = gross affiliate commission; user gets 70%, admin retains 30%.
+      // LedgerStatus enum: PENDING | CONFIRMED | PAID | REJECTED
+      const ledgerRows = await prisma.earningsLedger.findMany({
         where: {
           userId: { notIn: excludeUserIds },
-          transactionId: {
-            not: { startsWith: "test" },
-          },
+          kind: "COMMISSION",
         },
         select: {
-          commission: true,
+          commissionPaise: true,
           status: true,
         },
       });
@@ -111,25 +109,72 @@ export async function GET() {
       let approvedCutPaise = 0;
       let rejectedCutPaise = 0;
 
+      for (const row of ledgerRows) {
+        const grossPaise = Number(row.commissionPaise) || 0;
+        const cutPaise = Math.round(grossPaise * 0.30);
+        const st = String(row.status || "").toUpperCase().trim();
+
+        if (st === "PENDING") {
+          pendingCutPaise += cutPaise;
+        } else if (st === "CONFIRMED" || st === "PAID") {
+          approvedCutPaise += cutPaise;
+        } else if (st === "REJECTED") {
+          rejectedCutPaise += cutPaise;
+        }
+      }
+
+      // SECONDARY: Also aggregate from Conversion table (Cuelinks raw data)
+      // Conversion.commission = gross affiliate commission in rupees (same source as commissionPaise/100)
+      // We deduplicate via separate accumulation and take the MAX of the two sources to avoid double-counting.
+      const realConversions = await prisma.conversion.findMany({
+        where: {
+          userId: { notIn: excludeUserIds },
+          // Only exclude clearly test/mock IDs (not real OD order IDs)
+          NOT: [
+            { transactionId: { startsWith: "test-" } },
+            { transactionId: { startsWith: "sim-" } },
+            { transactionId: { startsWith: "mock-" } },
+            { transactionId: { startsWith: "demo-" } },
+          ],
+        },
+        select: {
+          commission: true,
+          status: true,
+        },
+      });
+
+      let convPendingCutPaise = 0;
+      let convApprovedCutPaise = 0;
+      let convRejectedCutPaise = 0;
+
       for (const c of realConversions) {
         const commRupees = Number(c.commission) || 0;
         const cutPaise = Math.round(commRupees * 100 * 0.30);
         const st = String(c.status || "").toLowerCase().trim();
 
         if (st === "approved" || st === "confirmed" || st === "paid") {
-          approvedCutPaise += cutPaise;
-        } else if (st === "pending" || st === "open" || st === "0") {
-          pendingCutPaise += cutPaise;
+          convApprovedCutPaise += cutPaise;
         } else if (
-          st === "rejected" ||
-          st === "cancelled" ||
-          st === "canceled" ||
-          st === "failed" ||
-          st === "declined" ||
-          st === "2"
+          st === "pending" || st === "open" || st === "in_review" ||
+          st === "processing" || st === "0"
         ) {
-          rejectedCutPaise += cutPaise;
+          convPendingCutPaise += cutPaise;
+        } else if (
+          st === "rejected" || st === "cancelled" || st === "canceled" ||
+          st === "failed" || st === "declined" || st === "2"
+        ) {
+          convRejectedCutPaise += cutPaise;
         }
+      }
+
+      // Use whichever source has higher data (EarningsLedger preferred as it's canonical)
+      if (
+        convPendingCutPaise + convApprovedCutPaise + convRejectedCutPaise >
+        pendingCutPaise + approvedCutPaise + rejectedCutPaise
+      ) {
+        pendingCutPaise = convPendingCutPaise;
+        approvedCutPaise = convApprovedCutPaise;
+        rejectedCutPaise = convRejectedCutPaise;
       }
 
       const totalPlatformRevenuePaise = approvedCutPaise + pendingCutPaise;
