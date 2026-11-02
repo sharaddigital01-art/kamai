@@ -44,7 +44,7 @@ async function handleSync(req: Request) {
   const effectiveUserId = filterUserId || authUser?.id || null;
 
   // Resolve the user's active subId strictly (never a static or master account subId)
-  let activeSubId: string | null = (rawSubId || "").trim() || null;
+  let activeSubId: string | null = (rawSubId || "").trim().toLowerCase() || null;
   if (!activeSubId && effectiveUserId) {
     if (isDatabaseConfigured()) {
       try {
@@ -53,7 +53,13 @@ async function handleSync(req: Request) {
           select: { subIdPrefix: true, referralCode: true, id: true },
         });
         if (dbUser) {
-          activeSubId = dbUser.subIdPrefix || dbUser.referralCode || `${dbUser.id.slice(0, 6)}_tg`;
+          activeSubId = (
+            dbUser.subIdPrefix ||
+            dbUser.referralCode ||
+            `${dbUser.id.slice(0, 8)}_tg`
+          )
+            .trim()
+            .toLowerCase();
         }
       } catch (err) {
         console.warn("Error fetching user for activeSubId:", err);
@@ -62,7 +68,13 @@ async function handleSync(req: Request) {
     if (!activeSubId) {
       const mockU = findMockUserById(effectiveUserId);
       if (mockU) {
-        activeSubId = mockU.subIdPrefix || mockU.referralCode || `${mockU.id.slice(0, 6)}_tg`;
+        activeSubId = (
+          mockU.subIdPrefix ||
+          mockU.referralCode ||
+          `${mockU.id.slice(0, 8)}_tg`
+        )
+          .trim()
+          .toLowerCase();
       }
     }
   }

@@ -59,6 +59,7 @@ export async function GET(req: Request) {
         targetChannelName: string | null;
         amazonTag: string | null;
         trackingSubId: string;
+        subId?: string;
         isActive: boolean;
       }> = [];
 
@@ -88,7 +89,11 @@ export async function GET(req: Request) {
           });
 
           for (const item of dbConfigs) {
-            const subIdPrefix = item.user?.subIdPrefix || "EK";
+            const subIdPrefix =
+              item.user?.subIdPrefix ||
+              item.user?.referralCode ||
+              item.userId.slice(0, 8);
+            const trackingSubId = `${subIdPrefix}_tg`.trim().toLowerCase();
             const targetChannelsList =
               item.targetChannels && Array.isArray(item.targetChannels) && item.targetChannels.length > 0
                 ? item.targetChannels
@@ -108,7 +113,8 @@ export async function GET(req: Request) {
               targetChannelId: item.targetChannelId || null,
               targetChannelName: item.targetChannelName || null,
               amazonTag: item.amazonTag || null,
-              trackingSubId: `${subIdPrefix}_tg`,
+              trackingSubId,
+              subId: trackingSubId,
               isActive: item.isActive,
             });
           }
@@ -122,7 +128,11 @@ export async function GET(req: Request) {
         const mockList = getAllMockTelegramConfigs(activeOnly);
         for (const item of mockList) {
           const u = findMockUserById(item.userId) || DEMO_USER;
-          const subIdPrefix = u?.subIdPrefix || "EK";
+          const subIdPrefix =
+            u?.subIdPrefix ||
+            u?.referralCode ||
+            item.userId.slice(0, 8);
+          const trackingSubId = `${subIdPrefix}_tg`.trim().toLowerCase();
           const targetChannelsList =
             item.targetChannels && Array.isArray(item.targetChannels) && item.targetChannels.length > 0
               ? item.targetChannels
@@ -142,7 +152,8 @@ export async function GET(req: Request) {
             targetChannelId: item.targetChannelId || null,
             targetChannelName: item.targetChannelName || null,
             amazonTag: item.amazonTag || null,
-            trackingSubId: `${subIdPrefix}_tg`,
+            trackingSubId,
+            subId: trackingSubId,
             isActive: item.isActive,
           });
         }
@@ -360,12 +371,14 @@ export async function GET(req: Request) {
     const userTrackingSubId =
       user?.trackingSubId ||
       (user?.subIdPrefix
-        ? `${user.subIdPrefix}_tg`
+        ? `${user.subIdPrefix}_tg`.trim().toLowerCase()
+        : user?.referralCode
+        ? `${user.referralCode}_tg`.trim().toLowerCase()
         : config?.userId
-        ? `${config.userId.slice(0, 6)}_tg`
+        ? `${config.userId.slice(0, 8)}_tg`.trim().toLowerCase()
         : targetUserId
-        ? `${targetUserId.slice(0, 6)}_tg`
-        : "KM_tg");
+        ? `${targetUserId.slice(0, 8)}_tg`.trim().toLowerCase()
+        : "km_tg");
 
     const sourceChannels =
       config?.sourceChannels && Array.isArray(config.sourceChannels)

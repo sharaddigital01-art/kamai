@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   fetchCuelinksTransactions,
   syncCuelinksTransactions,
+  resolveUserBySubId,
 } from "./cuelinksSync";
 import {
   createMockUser,
@@ -9,12 +10,14 @@ import {
   saveMockLink,
   getLiveTotalClicks,
   getLiveClicks,
+  upsertMockConversion,
 } from "./mockData";
 import { GET as reportsGet, POST as reportsPost } from "@/app/api/reports/route";
 import { GET as userStatsGet } from "@/app/api/user/stats/route";
 import { GET as syncGet, POST as syncPost } from "@/app/api/sync/cuelinks/route";
 import { GET as slugGet } from "@/app/[slug]/route";
 import { GET as rCodeGet } from "@/app/r/[code]/route";
+import { GET as userConfigGet } from "@/app/api/telegram/user-config/route";
 
 describe("SubId Stats Fetching & Instant Click Tracking", () => {
   const testUserId = "user-subid-test-" + Date.now();
@@ -185,6 +188,123 @@ describe("SubId Stats Fetching & Instant Click Tracking", () => {
       const json = await res.json();
       expect(json.authenticated).toBe(true);
       expect(json.activeSubId).toBe(testSubId);
+    });
+  });
+
+  describe("4. Dynamic Date Range Filter & Metric Cards", () => {
+    it("returns filtered stats for today, yesterday, 7d, 30d, all", async () => {
+      const ranges = ["today", "yesterday", "7d", "30d", "all"] as const;
+      for (const r of ranges) {
+        const req = new Request(
+          `http://localhost:3000/api/reports?userId=${testUserId}&subid=${testSubId}&range=${r}`
+        );
+        const res = await reportsGet(req);
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.range).toBe(r);
+        expect(json.stats).toBeDefined();
+        expect(Array.isArray(json.dailyStats)).toBe(true);
+        expect(json.dailyStats.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("correctly sums up 2 successful orders in totalTransactions instead of 0", async () => {
+      // Create 2 mock conversion orders for testUserId
+      upsertMockConversion({
+        transactionId: "tx-order-001",
+        storeName: "Flipkart",
+        saleAmount: 2500,
+        commission: 200,
+        status: "confirmed",
+        subid: `${testSubId}_tg`,
+        userId: testUserId,
+      });
+
+      upsertMockConversion({
+        transactionId: "tx-order-002",
+        storeName: "Myntra",
+        saleAmount: 1800,
+        commission: 150,
+        status: "confirmed",
+        subid: `${testSubId}_tg`,
+        userId: testUserId,
+      });
+
+      const req = new Request(
+        `http://localhost:3000/api/reports?userId=${testUserId}&subid=${testSubId}&range=all`
+      );
+      const res = await reportsGet(req);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.stats.totalTransactions).toBeGreaterThanOrEqual(2);
+    });
+
+    it("computes convRate with exact 2 decimal places: ((total_orders / total_clicks) * 100).toFixed(2) + '%'", async () => {
+      const req = new Request(
+        `http://localhost:3000/api/reports?userId=${testUserId}&subid=${testSubId}&range=all`
+      );
+      const res = await reportsGet(req);
+      const json = await res.json();
+      const clicks = json.stats.totalClicks;
+      const orders = json.stats.totalTransactions;
+      const expectedConv =
+        clicks > 0 ? `${((orders / clicks) * 100).toFixed(2)}%` : "0.0%";
+      expect(json.stats.convRate).toBe(expectedConv);
+    });
+  });
+
+  describe("5. Multi-Account Cuelinks SubID Sync & Case-Insensitive Matching", () => {
+    it("matches subId case-insensitively and with trimmed whitespace", async () => {
+      // Test matching uppercase, lowercase, mixed case, and with spaces
+      const resolvedExact = await resolveUserBySubId(testSubId);
+      expect(resolvedExact).toBe(testUserId);
+
+      const resolvedUpper = await resolveUserBySubId(testSubId.toUpperCase());
+      expect(resolvedUpper).toBe(testUserId);
+
+      const resolvedLower = await resolveUserBySubId(testSubId.toLowerCase());
+      expect(resolvedLower).toBe(testUserId);
+
+      const resolvedTrim = await resolveUserBySubId(`  ${testSubId}_tg  `);
+      expect(resolvedTrim).toBe(testUserId);
+
+      const resolvedStripped = await resolveUserBySubId(`${testSubId}_tg`);
+      expect(resolvedStripped).toBe(testUserId);
+    });
+
+    it("/api/telegram/user-config returns distinct subId for each user account without sharing static fallback", async () => {
+      const userA = "user-multi-a-" + Date.now();
+      const userB = "user-multi-b-" + Date.now();
+      createMockUser({
+        id: userA,
+        email: "usera@test.local",
+        name: "User A",
+        role: "USER",
+        referralCode: "REFA123",
+        subIdPrefix: "usra99",
+      });
+      createMockUser({
+        id: userB,
+        email: "userb@test.local",
+        name: "User B",
+        role: "USER",
+        referralCode: "REFB456",
+        subIdPrefix: "usrb88",
+      });
+
+      const reqA = new Request(`http://localhost:3000/api/telegram/user-config?userId=${userA}`);
+      const resA = await userConfigGet(reqA);
+      const jsonA = await resA.json();
+
+      const reqB = new Request(`http://localhost:3000/api/telegram/user-config?userId=${userB}`);
+      const resB = await userConfigGet(reqB);
+      const jsonB = await resB.json();
+
+      expect(jsonA.trackingSubId).toBe("usra99_tg");
+      expect(jsonB.trackingSubId).toBe("usrb88_tg");
+      expect(jsonA.trackingSubId).not.toBe(jsonB.trackingSubId);
+      expect(jsonA.trackingSubId).not.toBe("ek_tg");
+      expect(jsonB.trackingSubId).not.toBe("ek_tg");
     });
   });
 });

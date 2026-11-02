@@ -27,6 +27,80 @@ async function handleReports(req: Request) {
   const querySubId =
     reqUrl.searchParams.get("subid") || reqUrl.searchParams.get("subId");
   const shouldSync = reqUrl.searchParams.get("sync") === "true";
+  const queryRange = (
+    reqUrl.searchParams.get("range") || "all"
+  ).toLowerCase().trim();
+  const queryStartDate =
+    reqUrl.searchParams.get("startDate") ||
+    reqUrl.searchParams.get("start_date");
+  const queryEndDate =
+    reqUrl.searchParams.get("endDate") || reqUrl.searchParams.get("end_date");
+
+  // Determine date boundaries
+  const now = new Date();
+  let rangeStart: Date | null = null;
+  let rangeEnd: Date | null = null;
+
+  if (queryStartDate) {
+    rangeStart = new Date(queryStartDate);
+    rangeEnd = queryEndDate ? new Date(queryEndDate) : now;
+  } else if (queryRange === "today") {
+    rangeStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+    rangeEnd = now;
+  } else if (queryRange === "yesterday") {
+    rangeStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+      0,
+      0,
+      0,
+      0
+    );
+    rangeEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+      23,
+      59,
+      59,
+      999
+    );
+  } else if (queryRange === "7d") {
+    rangeStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 6,
+      0,
+      0,
+      0,
+      0
+    );
+    rangeEnd = now;
+  } else if (queryRange === "30d") {
+    rangeStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 29,
+      0,
+      0,
+      0,
+      0
+    );
+    rangeEnd = now;
+  } else {
+    // "all"
+    rangeStart = null;
+    rangeEnd = null;
+  }
 
   let user = await getApiUser().catch(() => null);
 
@@ -65,6 +139,7 @@ async function handleReports(req: Request) {
       authenticated: false,
       user: null,
       activeSubId: null,
+      range: queryRange,
       balances: {
         pending: 0,
         available: 0,
@@ -74,6 +149,7 @@ async function handleReports(req: Request) {
       },
       stats: {
         totalProfitPaise: 0,
+        allTimeProfitPaise: 0,
         availablePaise: 0,
         pendingPaise: 0,
         paidPaise: 0,
@@ -98,12 +174,13 @@ async function handleReports(req: Request) {
   }
 
   // Determine user active subId strictly (never a static or master account subId)
-  const userPrefix =
-    (user as any).subIdPrefix || user.referralCode || user.id.slice(0, 6);
+  const userPrefix = (
+    (user as any).subIdPrefix ||
+    user.referralCode ||
+    user.id.slice(0, 8)
+  ).trim();
   const activeSubId =
-    (querySubId || "").trim() ||
-    `${userPrefix}_tg` ||
-    userPrefix;
+    (querySubId || "").trim() || `${userPrefix}_tg` || userPrefix;
 
   // If sync requested or on refresh: fetch external affiliate stats strictly by active subId
   if (shouldSync && activeSubId) {
@@ -142,39 +219,61 @@ async function handleReports(req: Request) {
   }[] = [];
   let totalClicks = 0;
   let totalTxns = 0;
+  let periodProfitPaise = 0;
 
-  const userSubIds = [
+  const rawSubIds = [
+    activeSubId,
     userPrefix,
     `${userPrefix}_tg`,
     `${userPrefix}_web`,
     `${userPrefix}_link`,
     user.id,
     user.referralCode,
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
 
+  const userSubIds = Array.from(
+    new Set([
+      ...rawSubIds,
+      ...rawSubIds.map((s) => s.toLowerCase()),
+      ...rawSubIds.map((s) => s.toUpperCase()),
+    ])
+  );
+
+  let dbSuccess = false;
   if (isDatabaseConfigured()) {
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
-      sevenDaysAgo.setHours(0, 0, 0, 0);
-
       const clickWhere = {
         OR: [
           { userId: user.id },
-          { subId: { in: userSubIds } },
-          { subId: { startsWith: userPrefix } },
+          { subId: { in: userSubIds, mode: "insensitive" as const } },
+          { subId: { startsWith: userPrefix, mode: "insensitive" as const } },
+          {
+            subId: {
+              startsWith: userPrefix.toLowerCase(),
+              mode: "insensitive" as const,
+            },
+          },
         ],
       };
 
-      // Execute all 8 queries concurrently in parallel with specific column projections
+      const dateFilter = rangeStart
+        ? {
+            createdAt: {
+              gte: rangeStart,
+              ...(rangeEnd ? { lte: rangeEnd } : {}),
+            },
+          }
+        : undefined;
+
+      // Execute queries concurrently
       const [
-        userRows,
+        allUserRows,
         locked,
         userWithdrawals,
-        clicksCount,
+        periodClicksCount,
         shortAgg,
         genAgg,
-        userConversions,
+        allUserConversions,
         recentClicks,
       ] = await Promise.all([
         prisma.earningsLedger.findMany({
@@ -194,7 +293,10 @@ async function handleReports(req: Request) {
           orderBy: { createdAt: "desc" },
         }),
         prisma.withdrawal.aggregate({
-          where: { userId: user.id, status: { in: ["REQUESTED", "PROCESSING"] } },
+          where: {
+            userId: user.id,
+            status: { in: ["REQUESTED", "PROCESSING"] },
+          },
           _sum: { amountPaise: true },
         }),
         prisma.withdrawal.findMany({
@@ -210,7 +312,12 @@ async function handleReports(req: Request) {
           },
           orderBy: { requestedAt: "desc" },
         }),
-        prisma.click.count({ where: clickWhere }),
+        prisma.click.count({
+          where: {
+            ...clickWhere,
+            ...(dateFilter || {}),
+          },
+        }),
         prisma.shortLink.aggregate({
           where: clickWhere,
           _sum: { clickCount: true },
@@ -223,9 +330,19 @@ async function handleReports(req: Request) {
           where: {
             OR: [
               { userId: user.id },
-              { subid: userPrefix },
-              { subid: `${userPrefix}_tg` },
-              { subid: { startsWith: userPrefix } },
+              { subid: { in: userSubIds, mode: "insensitive" as const } },
+              {
+                subid: {
+                  startsWith: userPrefix,
+                  mode: "insensitive" as const,
+                },
+              },
+              {
+                subid: {
+                  startsWith: userPrefix.toLowerCase(),
+                  mode: "insensitive" as const,
+                },
+              },
             ],
           },
           select: {
@@ -243,25 +360,28 @@ async function handleReports(req: Request) {
         prisma.click.findMany({
           where: {
             ...clickWhere,
-            createdAt: { gte: sevenDaysAgo },
+            ...(rangeStart
+              ? {
+                  createdAt: {
+                    gte: rangeStart,
+                    ...(rangeEnd ? { lte: rangeEnd } : {}),
+                  },
+                }
+              : {
+                  createdAt: {
+                    gte: new Date(Date.now() - 30 * 86400000),
+                  },
+                }),
           },
           select: { createdAt: true },
         }),
       ]);
 
-      ledger = userRows.map((r) => ({
-        id: r.id,
-        store: r.store ? { name: r.store.name } : null,
-        externalOrderId: r.externalOrderId,
-        orderAmountPaise: r.orderAmountPaise,
-        userAmountPaise: r.userAmountPaise,
-        status: r.status,
-        createdAt: r.createdAt,
-      }));
-
-      for (const row of userRows) {
+      // Calculate lifetime balances across all history
+      for (const row of allUserRows) {
         if (row.status === "PENDING") balances.pending += row.userAmountPaise;
-        else if (row.status === "CONFIRMED") balances.available += row.userAmountPaise;
+        else if (row.status === "CONFIRMED")
+          balances.available += row.userAmountPaise;
         else if (row.status === "PAID") balances.paid += row.userAmountPaise;
       }
 
@@ -269,35 +389,12 @@ async function handleReports(req: Request) {
       balances.inWithdrawal = inWithdrawal;
       balances.available = Math.max(0, balances.available - inWithdrawal);
       balances.lifetime =
-        balances.pending + balances.available + balances.inWithdrawal + balances.paid;
+        balances.pending +
+        balances.available +
+        balances.inWithdrawal +
+        balances.paid;
 
-      withdrawals = userWithdrawals.map((w) => ({
-        id: w.id,
-        userId: w.userId,
-        amountPaise: w.amountPaise,
-        status: w.status,
-        method: w.method,
-        upiId: (w.payoutSnapshot as any)?.upiId || "UPI",
-        requestedAt: w.requestedAt,
-      }));
-
-      // Real Total Clicks = Click rows matching userId OR subId + ShortLink clicks + GeneratedLink clicks
-      const sumShort = shortAgg._sum.clickCount ?? 0;
-      const sumGen = genAgg._sum.clickCount ?? 0;
-      totalClicks = Math.max(clicksCount, sumShort + sumGen);
-
-      conversions = userConversions.map((c) => ({
-        id: c.id,
-        transactionId: c.transactionId,
-        storeName: c.storeName,
-        saleAmount: c.saleAmount,
-        commission: c.commission,
-        status: c.status,
-        subid: c.subid,
-        createdAt: c.createdAt,
-      }));
-
-      const approvedConversions = userConversions.filter(
+      const approvedConversions = allUserConversions.filter(
         (c) =>
           c.status === "PAID" ||
           c.status === "CONFIRMED" ||
@@ -319,107 +416,410 @@ async function handleReports(req: Request) {
         );
       }
 
-      totalTxns = Math.max(
-        userConversions.length,
-        userRows.filter((r) => r.status === "CONFIRMED" || r.status === "PAID")
-          .length
-      );
+      // Filter rows and conversions strictly by the requested date range
+      const filteredLedgerRows = allUserRows.filter((r) => {
+        if (!rangeStart) return true;
+        const rTime = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+        if (rangeEnd)
+          return (
+            rTime >= rangeStart.getTime() && rTime <= rangeEnd.getTime()
+          );
+        return rTime >= rangeStart.getTime();
+      });
 
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dateStr = d.toISOString().slice(0, 10);
-        const dayLabel =
-          i === 0 ? "Today" : d.toLocaleDateString("en-US", { weekday: "short" });
+      const filteredConversions = allUserConversions.filter((c) => {
+        if (!rangeStart) return true;
+        const cTime = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+        if (rangeEnd)
+          return (
+            cTime >= rangeStart.getTime() && cTime <= rangeEnd.getTime()
+          );
+        return cTime >= rangeStart.getTime();
+      });
 
-        const dayClicks = recentClicks.filter(
-          (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
-        ).length;
+      ledger = filteredLedgerRows.map((r) => ({
+        id: r.id,
+        store: r.store ? { name: r.store.name } : null,
+        externalOrderId: r.externalOrderId,
+        orderAmountPaise: r.orderAmountPaise,
+        userAmountPaise: r.userAmountPaise,
+        status: r.status,
+        createdAt: r.createdAt,
+      }));
 
-        const dayConversions = userConversions.filter(
-          (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
-        );
+      conversions = filteredConversions.map((c) => ({
+        id: c.id,
+        transactionId: c.transactionId,
+        storeName: c.storeName,
+        saleAmount: c.saleAmount,
+        commission: c.commission,
+        status: c.status,
+        subid: c.subid,
+        createdAt: c.createdAt,
+      }));
 
-        const dayProfitPaise = dayConversions
-          .filter(
-            (c) =>
-              c.status === "PAID" ||
-              c.status === "CONFIRMED" ||
-              c.status === "confirmed"
-          )
-          .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+      withdrawals = userWithdrawals.map((w) => ({
+        id: w.id,
+        userId: w.userId,
+        amountPaise: w.amountPaise,
+        status: w.status,
+        method: w.method,
+        upiId: (w.payoutSnapshot as any)?.upiId || "UPI",
+        requestedAt: w.requestedAt,
+      }));
 
-        const dayOrders = dayConversions.length;
+      // Calculate total clicks for the period
+      const sumShort = shortAgg._sum.clickCount ?? 0;
+      const sumGen = genAgg._sum.clickCount ?? 0;
+      totalClicks =
+        queryRange === "all"
+          ? Math.max(periodClicksCount, sumShort + sumGen)
+          : periodClicksCount;
 
-        dailyStats.push({
-          date: dateStr,
-          label: dayLabel,
-          clicks: dayClicks,
-          profitPaise: dayProfitPaise,
-          orders: dayOrders,
-        });
+      // Count successful orders in the selected range
+      const successfulOrderIds = new Set<string>();
+      for (const c of filteredConversions) {
+        const st = String(c.status || "").toLowerCase();
+        if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
+          successfulOrderIds.add(String(c.transactionId || c.id));
+        }
+      }
+      for (const r of filteredLedgerRows) {
+        const st = String(r.status || "").toLowerCase();
+        if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
+          successfulOrderIds.add(String(r.externalOrderId || r.id));
+        }
       }
 
-      const todayStat = dailyStats[dailyStats.length - 1];
-      if (todayStat) {
+      totalTxns = Math.max(
+        successfulOrderIds.size,
+        filteredConversions.filter((c) => {
+          const st = String(c.status || "").toLowerCase();
+          return st !== "rejected" && st !== "cancelled" && st !== "failed";
+        }).length,
+        filteredLedgerRows.filter((r) => {
+          const st = String(r.status || "").toLowerCase();
+          return st !== "rejected" && st !== "cancelled" && st !== "failed";
+        }).length
+      );
+
+      // Period profit
+      const periodLedgerProfit = filteredLedgerRows
+        .filter((r) => r.status === "CONFIRMED" || r.status === "PAID")
+        .reduce((sum, r) => sum + (r.userAmountPaise || 0), 0);
+
+      const periodConvProfit = filteredConversions
+        .filter((c) => {
+          const st = String(c.status || "").toLowerCase();
+          return st === "paid" || st === "confirmed" || st === "approved";
+        })
+        .reduce((sum, c) => sum + Math.round((c.commission || 0) * 100), 0);
+
+      periodProfitPaise =
+        queryRange === "all"
+          ? balances.lifetime
+          : Math.max(periodLedgerProfit, periodConvProfit);
+
+      // Construct graph daily/hourly stats tailored to requested period
+      if (queryRange === "today") {
+        const hourBuckets = [
+          { label: "12 AM", startHour: 0, endHour: 4 },
+          { label: "4 AM", startHour: 4, endHour: 8 },
+          { label: "8 AM", startHour: 8, endHour: 12 },
+          { label: "12 PM", startHour: 12, endHour: 16 },
+          { label: "4 PM", startHour: 16, endHour: 20 },
+          { label: "8 PM", startHour: 20, endHour: 24 },
+          { label: "Now", startHour: 0, endHour: 24 },
+        ];
+        const todayDateStr = now.toISOString().slice(0, 10);
+
+        for (let bIdx = 0; bIdx < hourBuckets.length; bIdx++) {
+          const bucket = hourBuckets[bIdx]!;
+          if (bIdx === hourBuckets.length - 1) {
+            // "Now" cumulative/summary point
+            dailyStats.push({
+              date: todayDateStr,
+              label: bucket.label,
+              clicks: totalClicks,
+              profitPaise: periodProfitPaise,
+              orders: totalTxns,
+            });
+          } else {
+            const bClicks = recentClicks.filter((c) => {
+              const h = c.createdAt.getHours();
+              return h >= bucket.startHour && h < bucket.endHour;
+            }).length;
+            const bConvs = filteredConversions.filter((c) => {
+              const h = c.createdAt.getHours();
+              return h >= bucket.startHour && h < bucket.endHour;
+            });
+            const bProfit = bConvs
+              .filter((c) => {
+                const st = String(c.status || "").toLowerCase();
+                return st === "paid" || st === "confirmed" || st === "approved";
+              })
+              .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+            dailyStats.push({
+              date: todayDateStr,
+              label: bucket.label,
+              clicks: bClicks,
+              profitPaise: bProfit,
+              orders: bConvs.length,
+            });
+          }
+        }
+      } else if (queryRange === "yesterday") {
+        const hourBuckets = [
+          { label: "12 AM", startHour: 0, endHour: 4 },
+          { label: "4 AM", startHour: 4, endHour: 8 },
+          { label: "8 AM", startHour: 8, endHour: 12 },
+          { label: "12 PM", startHour: 12, endHour: 16 },
+          { label: "4 PM", startHour: 16, endHour: 20 },
+          { label: "8 PM", startHour: 20, endHour: 24 },
+          { label: "11:59 PM", startHour: 0, endHour: 24 },
+        ];
+        const yDate = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate() - 1
+        );
+        const yDateStr = yDate.toISOString().slice(0, 10);
+
+        for (let bIdx = 0; bIdx < hourBuckets.length; bIdx++) {
+          const bucket = hourBuckets[bIdx]!;
+          if (bIdx === hourBuckets.length - 1) {
+            dailyStats.push({
+              date: yDateStr,
+              label: bucket.label,
+              clicks: totalClicks,
+              profitPaise: periodProfitPaise,
+              orders: totalTxns,
+            });
+          } else {
+            const bClicks = recentClicks.filter((c) => {
+              const h = c.createdAt.getHours();
+              return h >= bucket.startHour && h < bucket.endHour;
+            }).length;
+            const bConvs = filteredConversions.filter((c) => {
+              const h = c.createdAt.getHours();
+              return h >= bucket.startHour && h < bucket.endHour;
+            });
+            const bProfit = bConvs
+              .filter((c) => {
+                const st = String(c.status || "").toLowerCase();
+                return st === "paid" || st === "confirmed" || st === "approved";
+              })
+              .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+            dailyStats.push({
+              date: yDateStr,
+              label: bucket.label,
+              clicks: bClicks,
+              profitPaise: bProfit,
+              orders: bConvs.length,
+            });
+          }
+        }
+      } else if (queryRange === "30d") {
+        const daySteps = [29, 24, 19, 14, 9, 4, 0];
+        for (let idx = 0; idx < daySteps.length; idx++) {
+          const step = daySteps[idx]!;
+          const d = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() - step
+          );
+          const dateStr = d.toISOString().slice(0, 10);
+          const dayLabel = step === 0 ? "Today" : `Day ${30 - step}`;
+
+          const dayClicks = recentClicks.filter(
+            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
+          ).length;
+
+          const dayConversions = filteredConversions.filter(
+            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
+          );
+
+          const dayProfit = dayConversions
+            .filter((c) => {
+              const st = String(c.status || "").toLowerCase();
+              return st === "paid" || st === "confirmed" || st === "approved";
+            })
+            .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+
+          dailyStats.push({
+            date: dateStr,
+            label: dayLabel,
+            clicks: dayClicks,
+            profitPaise: dayProfit,
+            orders: dayConversions.length,
+          });
+        }
+      } else {
+        // "7d" and "all" (default 7 days)
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() - i
+          );
+          const dateStr = d.toISOString().slice(0, 10);
+          const dayLabel =
+            i === 0
+              ? "Today"
+              : d.toLocaleDateString("en-US", { weekday: "short" });
+
+          const dayClicks = recentClicks.filter(
+            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
+          ).length;
+
+          const dayConversions = filteredConversions.filter(
+            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
+          );
+
+          const dayProfitPaise = dayConversions
+            .filter((c) => {
+              const st = String(c.status || "").toLowerCase();
+              return st === "paid" || st === "confirmed" || st === "approved";
+            })
+            .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+
+          dailyStats.push({
+            date: dateStr,
+            label: dayLabel,
+            clicks: dayClicks,
+            profitPaise: dayProfitPaise,
+            orders: dayConversions.length,
+          });
+        }
+      }
+
+      // If curve is all zero but period has total metrics, ensure the last point reflects the total
+      const lastStat = dailyStats[dailyStats.length - 1];
+      if (lastStat) {
         if (dailyStats.every((d) => d.clicks === 0) && totalClicks > 0) {
-          todayStat.clicks = totalClicks;
+          lastStat.clicks = totalClicks;
         }
         if (
           dailyStats.every((d) => d.profitPaise === 0) &&
-          balances.lifetime > 0
+          periodProfitPaise > 0
         ) {
-          todayStat.profitPaise = balances.lifetime;
-          todayStat.orders = totalTxns;
+          lastStat.profitPaise = periodProfitPaise;
+          lastStat.orders = totalTxns;
         }
       }
+      dbSuccess = true;
     } catch (e) {
-      console.warn("Error calculating user database reports stats:", e);
+      console.warn("Error calculating user database reports stats, using fallback:", e);
+      dbSuccess = false;
     }
-  } else {
-    // Fallback mode
+  }
+
+  if (!dbSuccess) {
+    // Fallback mode (mock store / test environments)
     balances = getUserBalances(user.id);
-    ledger = getLiveLedger().filter(
+    const allLedger = getLiveLedger().filter(
       (l) => (l as any).userId === user.id || user.id === DEMO_USER.id
     );
+    const allConversions = getMockConversions(user.id);
+    const allClicks = getLiveClicks(user.id);
+
+    const filteredLedger = allLedger.filter((l) => {
+      if (!rangeStart) return true;
+      const lTime = l.createdAt ? new Date(l.createdAt).getTime() : 0;
+      if (rangeEnd)
+        return (
+          lTime >= rangeStart.getTime() && lTime <= rangeEnd.getTime()
+        );
+      return lTime >= rangeStart.getTime();
+    });
+
+    const filteredConversions = allConversions.filter((c) => {
+      if (!rangeStart) return true;
+      const cTime = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+      if (rangeEnd)
+        return (
+          cTime >= rangeStart.getTime() && cTime <= rangeEnd.getTime()
+        );
+      return cTime >= rangeStart.getTime();
+    });
+
+    const filteredClicks = allClicks.filter((c) => {
+      if (!rangeStart) return true;
+      const cTime = c.timestamp ? new Date(c.timestamp).getTime() : 0;
+      if (rangeEnd)
+        return (
+          cTime >= rangeStart.getTime() && cTime <= rangeEnd.getTime()
+        );
+      return cTime >= rangeStart.getTime();
+    });
+
+    ledger = filteredLedger;
+    conversions = filteredConversions;
     withdrawals = getLiveWithdrawals().filter(
       (w) => w.userId === user.id || user.id === DEMO_USER.id
     );
-    conversions = getMockConversions(user.id);
-    totalClicks = Math.max(
-      getLiveTotalClicks(user.id),
-      getLiveClicks(user.id).length
-    );
+
+    totalClicks =
+      queryRange === "all"
+        ? Math.max(getLiveTotalClicks(user.id), allClicks.length)
+        : filteredClicks.length;
+
     totalTxns = Math.max(
-      conversions.length,
-      ledger.filter((l) => l.status === "CONFIRMED" || l.status === "PAID").length
+      filteredConversions.filter(
+        (c) => String(c.status).toLowerCase() !== "rejected"
+      ).length,
+      filteredLedger.filter(
+        (l) => l.status === "CONFIRMED" || l.status === "PAID"
+      ).length
     );
 
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const dayLabel =
-        i === 0 ? "Today" : d.toLocaleDateString("en-US", { weekday: "short" });
+    const periodLedgerProfit = filteredLedger
+      .filter((l) => l.status === "CONFIRMED" || l.status === "PAID")
+      .reduce((sum, l) => sum + (l.userAmountPaise || 0), 0);
 
+    const periodConvProfit = filteredConversions
+      .filter((c) => {
+        const st = String(c.status || "").toLowerCase();
+        return st === "confirmed" || st === "paid" || st === "approved";
+      })
+      .reduce((sum, c) => sum + Math.round((c.commission || 0) * 100), 0);
+
+    periodProfitPaise =
+      queryRange === "all"
+        ? balances.lifetime
+        : Math.max(periodLedgerProfit, periodConvProfit);
+
+    const labels =
+      queryRange === "today"
+        ? ["12 AM", "4 AM", "8 AM", "12 PM", "4 PM", "8 PM", "Now"]
+        : queryRange === "yesterday"
+        ? ["12 AM", "4 AM", "8 AM", "12 PM", "4 PM", "8 PM", "11:59 PM"]
+        : queryRange === "30d"
+        ? ["Day 1", "Day 5", "Day 10", "Day 15", "Day 20", "Day 25", "Today"]
+        : ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"];
+
+    for (let i = 0; i < labels.length; i++) {
+      const isLast = i === labels.length - 1;
       dailyStats.push({
-        date: dateStr,
-        label: dayLabel,
-        clicks: i === 0 ? totalClicks : 0,
-        profitPaise: i === 0 ? balances.lifetime : 0,
-        orders: i === 0 ? totalTxns : 0,
+        date: "",
+        label: labels[i]!,
+        clicks: isLast ? totalClicks : 0,
+        profitPaise: isLast ? periodProfitPaise : 0,
+        orders: isLast ? totalTxns : 0,
       });
     }
   }
 
+  // Dynamic conversion rate calculation: ((orders / clicks) * 100).toFixed(2) + '%'
   const convRate =
     totalClicks > 0
-      ? `${((totalTxns / totalClicks) * 100).toFixed(1)}%`
+      ? `${((totalTxns / totalClicks) * 100).toFixed(2)}%`
       : "0.0%";
 
   const res = NextResponse.json({
     authenticated: true,
     activeSubId,
+    range: queryRange,
     user: {
       id: user.id,
       email: user.email,
@@ -430,7 +830,8 @@ async function handleReports(req: Request) {
     },
     balances,
     stats: {
-      totalProfitPaise: balances.lifetime,
+      totalProfitPaise: periodProfitPaise,
+      allTimeProfitPaise: balances.lifetime,
       availablePaise: balances.available,
       pendingPaise: balances.pending,
       paidPaise: balances.paid,

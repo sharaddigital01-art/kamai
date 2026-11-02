@@ -135,26 +135,39 @@ export function normalizeConversionStatus(
 export async function resolveUserBySubId(subId: string): Promise<string | null> {
   const cleanSub = (subId || "").trim();
   if (!cleanSub) return null;
+  const lowerSub = cleanSub.toLowerCase();
 
   if (isDatabaseConfigured()) {
     try {
       // 1. Direct match on GeneratedLink (subId or code)
       const link = await prisma.generatedLink.findFirst({
-        where: { OR: [{ subId: cleanSub }, { code: cleanSub }] },
+        where: {
+          OR: [
+            { subId: { equals: cleanSub, mode: "insensitive" } },
+            { code: { equals: cleanSub, mode: "insensitive" } },
+          ],
+        },
         select: { userId: true },
       });
       if (link?.userId) return link.userId;
 
       // 1b. Direct match on ShortLink (subId or slug)
       const shortLink = await prisma.shortLink.findFirst({
-        where: { OR: [{ subId: cleanSub }, { slug: cleanSub }] },
+        where: {
+          OR: [
+            { subId: { equals: cleanSub, mode: "insensitive" } },
+            { slug: { equals: cleanSub, mode: "insensitive" } },
+          ],
+        },
         select: { userId: true },
       });
       if (shortLink?.userId) return shortLink.userId;
 
       // 1c. Match on TelegramChannelConfig
       const tgConfig = await prisma.telegramChannelConfig.findFirst({
-        where: { telegramUserId: cleanSub },
+        where: {
+          telegramUserId: { equals: cleanSub, mode: "insensitive" },
+        },
         select: { userId: true },
       });
       if (tgConfig?.userId) return tgConfig.userId;
@@ -186,17 +199,17 @@ export async function resolveUserBySubId(subId: string): Promise<string | null> 
       }
 
       // 4. SubIdPrefix or referralCode or prefix before underscore / tg suffix
-      const stripped = cleanSub.replace(/_tg$|-tg$|_web$/i, "");
+      const stripped = cleanSub.replace(/_tg$|-tg$|_web$|_link$/i, "");
       const prefix = stripped.includes("_") ? stripped.split("_")[0] : (stripped.slice(0, 8) || cleanSub);
       const userByPrefix = await prisma.user.findFirst({
         where: {
           OR: [
-            { subIdPrefix: cleanSub },
-            { subIdPrefix: stripped },
-            { subIdPrefix: prefix },
-            { referralCode: cleanSub },
-            { referralCode: stripped },
-            { referralCode: prefix },
+            { subIdPrefix: { equals: cleanSub, mode: "insensitive" } },
+            { subIdPrefix: { equals: stripped, mode: "insensitive" } },
+            { subIdPrefix: { equals: prefix, mode: "insensitive" } },
+            { referralCode: { equals: cleanSub, mode: "insensitive" } },
+            { referralCode: { equals: stripped, mode: "insensitive" } },
+            { referralCode: { equals: prefix, mode: "insensitive" } },
           ],
         },
         select: { id: true },
@@ -213,18 +226,38 @@ export async function resolveUserBySubId(subId: string): Promise<string | null> 
 
   const g = globalThis as any;
   if (g.mockUsers) {
+    const strippedLower = cleanSub.replace(/_tg$|-tg$|_web$|_link$/i, "").toLowerCase();
+    const prefixLower = strippedLower.includes("_")
+      ? strippedLower.split("_")[0]
+      : (strippedLower.slice(0, 8) || lowerSub);
+
     for (const u of g.mockUsers.values()) {
-      if (u.id === cleanSub) return u.id;
-      if (cleanSub.startsWith(u.id)) return u.id;
+      const uId = (u.id || "").toLowerCase();
+      const uPrefix = (u.subIdPrefix || "").toLowerCase();
+      const uRef = (u.referralCode || "").toLowerCase();
+
+      if (uId === lowerSub || lowerSub.startsWith(uId)) return u.id;
+
       if (
-        u.subIdPrefix &&
-        (cleanSub === u.subIdPrefix ||
-          cleanSub.startsWith(u.subIdPrefix) ||
-          cleanSub === `${u.subIdPrefix}_tg`)
+        uPrefix &&
+        (lowerSub === uPrefix ||
+          lowerSub.startsWith(uPrefix) ||
+          lowerSub === `${uPrefix}_tg` ||
+          strippedLower === uPrefix ||
+          prefixLower === uPrefix)
       ) {
         return u.id;
       }
-      if (u.referralCode && cleanSub === u.referralCode) return u.id;
+
+      if (
+        uRef &&
+        (lowerSub === uRef ||
+          lowerSub.startsWith(uRef) ||
+          strippedLower === uRef ||
+          prefixLower === uRef)
+      ) {
+        return u.id;
+      }
     }
   }
 

@@ -246,11 +246,18 @@ export function setCachedStats(data: CachedStatsData): void {
 
 // Convenience accessors for Reports
 export const CACHE_KEY_REPORTS = "reports_data";
-export function getCachedReportsData(): any | null {
+export function getCachedReportsData(range?: string): any | null {
+  if (range) {
+    const rangeHit = getCachedValue<any>(`${CACHE_KEY_REPORTS}_${range}`);
+    if (rangeHit) return rangeHit;
+  }
   return getCachedValue<any>(CACHE_KEY_REPORTS);
 }
-export function setCachedReportsData(data: any): void {
+export function setCachedReportsData(data: any, range?: string): void {
   setCachedValue(CACHE_KEY_REPORTS, data);
+  if (range) {
+    setCachedValue(`${CACHE_KEY_REPORTS}_${range}`, data);
+  }
 }
 
 // Convenience accessors for Telegram Automation Config

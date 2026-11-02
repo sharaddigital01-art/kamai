@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { isDatabaseConfigured, DEMO_USER, recordCuelinksPostback } from "@/lib/mockData";
+import { resolveUserBySubId } from "@/lib/cuelinksSync";
 
 export const runtime = "nodejs";
 
@@ -98,57 +99,10 @@ function extractPostbackParams(raw: Record<string, any>) {
  * Resolves the target userId from the subid passed by Cuelinks
  */
 async function resolveUserId(subId: string): Promise<string> {
-  if (!subId) return DEMO_USER.id;
-
-  if (isDatabaseConfigured()) {
-    try {
-      // 1. Check if subId directly matches a GeneratedLink
-      const link = await prisma.generatedLink.findFirst({
-        where: { OR: [{ subId }, { code: subId }] },
-        select: { userId: true },
-      });
-      if (link?.userId) return link.userId;
-
-      // 2. Check if subId is formatted as `${userId}_${code}`
-      if (subId.includes("_")) {
-        const potentialId = subId.split("_")[0];
-        if (potentialId) {
-          // Full UUID format
-          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(potentialId)) {
-            const user = await prisma.user.findUnique({ where: { id: potentialId }, select: { id: true } });
-            if (user) return user.id;
-          }
-          // 32-char compact hex UUID format
-          if (/^[0-9a-f]{32}$/i.test(potentialId)) {
-            const formatted = `${potentialId.slice(0, 8)}-${potentialId.slice(8, 12)}-${potentialId.slice(12, 16)}-${potentialId.slice(16, 20)}-${potentialId.slice(20)}`;
-            const user = await prisma.user.findUnique({ where: { id: formatted }, select: { id: true } });
-            if (user) return user.id;
-          }
-        }
-      }
-
-      // 3. Check if subId is directly a user UUID
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subId)) {
-        const user = await prisma.user.findUnique({ where: { id: subId }, select: { id: true } });
-        if (user) return user.id;
-      }
-
-      // 4. Check if subId matches a subIdPrefix or referralCode
-      const userByPrefix = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { subIdPrefix: { not: "", equals: subId.slice(0, 6) } },
-            { referralCode: { not: "", equals: subId } },
-          ],
-        },
-        select: { id: true },
-      });
-      if (userByPrefix) return userByPrefix.id;
-    } catch (err) {
-      console.warn("Database lookup error in resolveUserId:", err);
-    }
-  }
-
+  const cleanSub = (subId || "").trim();
+  if (!cleanSub) return DEMO_USER.id;
+  const resolved = await resolveUserBySubId(cleanSub);
+  if (resolved) return resolved;
   return DEMO_USER.id;
 }
 

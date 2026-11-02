@@ -32,6 +32,7 @@ import {
 
 interface StatsData {
   totalProfitPaise: number;
+  allTimeProfitPaise?: number;
   availablePaise: number;
   pendingPaise: number;
   paidPaise: number;
@@ -49,8 +50,72 @@ interface DailyStat {
   orders: number;
 }
 
+type Period = "today" | "yesterday" | "7d" | "30d" | "all";
+
+function getDateBoundaries(p: Period) {
+  const now = new Date();
+  if (p === "today") {
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+    return { startDate: start.toISOString(), endDate: now.toISOString() };
+  }
+  if (p === "yesterday") {
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+      0,
+      0,
+      0,
+      0
+    );
+    const end = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+      23,
+      59,
+      59,
+      999
+    );
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
+  }
+  if (p === "7d") {
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 6,
+      0,
+      0,
+      0,
+      0
+    );
+    return { startDate: start.toISOString(), endDate: now.toISOString() };
+  }
+  if (p === "30d") {
+    const start = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 29,
+      0,
+      0,
+      0,
+      0
+    );
+    return { startDate: start.toISOString(), endDate: now.toISOString() };
+  }
+  return {};
+}
+
 export default function ReportsPage() {
-  const [period, setPeriod] = useState<"today" | "7d" | "30d" | "all">("30d");
+  const [period, setPeriod] = useState<Period>("30d");
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showBreakup, setShowBreakup] = useState(false);
   const [activeTooltip, setActiveTooltip] = useState<{
@@ -61,6 +126,7 @@ export default function ReportsPage() {
     profitPaise: number;
     orders: number;
   } | null>(null);
+
   // Instant synchronous state from memory / SWR cache (<100ms / 0ms)
   const initialCache = getCachedReportsData();
   const cachedUser = getCachedUser();
@@ -96,17 +162,32 @@ export default function ReportsPage() {
     return null;
   });
 
+  const [balances, setBalances] = useState(() => {
+    return (
+      initialCache?.balances || {
+        pending: 0,
+        available: 0,
+        inWithdrawal: 0,
+        paid: 0,
+        lifetime: 0,
+      }
+    );
+  });
+
   const [stats, setStats] = useState<StatsData>(() => {
-    return initialCache?.stats || {
-      totalProfitPaise: 0,
-      availablePaise: 0,
-      pendingPaise: 0,
-      paidPaise: 0,
-      inWithdrawalPaise: 0,
-      totalClicks: 0,
-      totalTransactions: 0,
-      convRate: "0.0%",
-    };
+    return (
+      initialCache?.stats || {
+        totalProfitPaise: 0,
+        allTimeProfitPaise: 0,
+        availablePaise: 0,
+        pendingPaise: 0,
+        paidPaise: 0,
+        inWithdrawalPaise: 0,
+        totalClicks: 0,
+        totalTransactions: 0,
+        convRate: "0.0%",
+      }
+    );
   });
 
   const [dailyStats, setDailyStats] = useState<DailyStat[]>(() => {
@@ -117,11 +198,19 @@ export default function ReportsPage() {
     return Array.isArray(initialCache?.ledger) ? initialCache.ledger : [];
   });
 
+  const [conversions, setConversions] = useState<any[]>(() => {
+    return Array.isArray(initialCache?.conversions) ? initialCache.conversions : [];
+  });
+
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
 
-  async function loadData(forceBypass = false, userOverride?: { id: string; subId?: string | null }) {
+  async function loadData(
+    forceBypass = false,
+    userOverride?: { id: string; subId?: string | null },
+    targetPeriod: Period = period
+  ) {
     try {
       const timestamp = Date.now();
       const params = new URLSearchParams();
@@ -132,13 +221,38 @@ export default function ReportsPage() {
       const targetSubId = userOverride?.subId || currentUser?.subId;
       if (targetUserId) params.set("userId", targetUserId);
       if (targetSubId) params.set("subid", targetSubId);
+      params.set("range", targetPeriod);
+
+      const bounds = getDateBoundaries(targetPeriod);
+      if (bounds.startDate) params.set("startDate", bounds.startDate);
+      if (bounds.endDate) params.set("endDate", bounds.endDate);
 
       const qs = params.toString();
       const url = qs ? `/api/reports?${qs}` : "/api/reports";
+      const cacheKey = `${CACHE_KEY_REPORTS}_${targetUserId || "self"}_${targetPeriod}`;
+
+      const applyData = (data: any) => {
+        setIsAuthenticated(Boolean(data.authenticated));
+        if (data.user) {
+          setCurrentUser({
+            id: data.user.id,
+            name: data.user.name,
+            email: data.user.email,
+            subId: data.activeSubId || data.user.subIdPrefix || null,
+          });
+        }
+        if (data.balances) setBalances(data.balances);
+        if (data.stats) setStats(data.stats);
+        if (Array.isArray(data.ledger)) setLedger(data.ledger);
+        if (Array.isArray(data.conversions)) setConversions(data.conversions);
+        if (Array.isArray(data.dailyStats) && data.dailyStats.length > 0) {
+          setDailyStats(data.dailyStats);
+        }
+      };
 
       // If not forced and we have fresh cache, use SWR fetch
       const data = await fetchWithSwr(
-        `${CACHE_KEY_REPORTS}_${targetUserId || "self"}`,
+        cacheKey,
         async () => {
           const res = await fetch(url, {
             cache: "no-store",
@@ -156,20 +270,7 @@ export default function ReportsPage() {
           onBackgroundUpdate: (fresh) => {
             if (fresh) {
               setCachedReportsData(fresh);
-              setIsAuthenticated(Boolean(fresh.authenticated));
-              if (fresh.user) {
-                setCurrentUser({
-                  id: fresh.user.id,
-                  name: fresh.user.name,
-                  email: fresh.user.email,
-                  subId: fresh.activeSubId || fresh.user.subIdPrefix || null,
-                });
-              }
-              if (fresh.stats) setStats(fresh.stats);
-              if (fresh.ledger) setLedger(fresh.ledger);
-              if (Array.isArray(fresh.dailyStats) && fresh.dailyStats.length > 0) {
-                setDailyStats(fresh.dailyStats);
-              }
+              applyData(fresh);
             }
           },
         }
@@ -177,20 +278,7 @@ export default function ReportsPage() {
 
       if (data) {
         setCachedReportsData(data);
-        setIsAuthenticated(Boolean(data.authenticated));
-        if (data.user) {
-          setCurrentUser({
-            id: data.user.id,
-            name: data.user.name,
-            email: data.user.email,
-            subId: data.activeSubId || data.user.subIdPrefix || null,
-          });
-        }
-        if (data.stats) setStats(data.stats);
-        if (data.ledger) setLedger(data.ledger);
-        if (Array.isArray(data.dailyStats) && data.dailyStats.length > 0) {
-          setDailyStats(data.dailyStats);
-        }
+        applyData(data);
       }
     } catch {
       if (!initialCache) {
@@ -200,7 +288,7 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    loadData();
+    loadData(false, undefined, period);
   }, []);
 
   async function handleRefreshLive() {
@@ -230,12 +318,12 @@ export default function ReportsPage() {
       } else {
         setSyncMessage("Live sync complete.");
       }
-      // Force immediate database re-read for that specific userId with fresh timestamp
-      await loadData(true);
+      // Force immediate database re-read for that specific userId with fresh timestamp and current period
+      await loadData(true, undefined, period);
     } catch (err) {
       console.warn("Error refreshing live Cuelinks data:", err);
       setSyncMessage("Refreshed local stats.");
-      await loadData(true);
+      await loadData(true, undefined, period);
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMessage(null), 4000);
@@ -256,7 +344,7 @@ export default function ReportsPage() {
         }),
       });
       if (res.ok) {
-        await loadData();
+        await loadData(true, undefined, period);
       }
     } catch {
       //
@@ -269,16 +357,23 @@ export default function ReportsPage() {
   const baseClicks = stats.totalClicks;
   const baseOrders = stats.totalTransactions;
 
-  const labels =
-    dailyStats.length > 0
-      ? dailyStats.map((d) => d.label)
+  const defaultLabels =
+    period === "today"
+      ? ["12 AM", "4 AM", "8 AM", "12 PM", "4 PM", "8 PM", "Now"]
+      : period === "yesterday"
+      ? ["12 AM", "4 AM", "8 AM", "12 PM", "4 PM", "8 PM", "11:59 PM"]
+      : period === "30d"
+      ? ["Day 1", "Day 5", "Day 10", "Day 15", "Day 20", "Day 25", "Today"]
       : ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"];
+
+  const labels =
+    dailyStats.length > 0 ? dailyStats.map((d) => d.label) : defaultLabels;
 
   const points =
     dailyStats.length > 0
       ? dailyStats.map((d) => d.clicks)
       : baseClicks === 0 && baseOrders === 0
-      ? [0, 0, 0, 0, 0, 0, 0]
+      ? Array(labels.length).fill(0)
       : [
           Math.max(0, Math.round(baseClicks * 0.1)),
           Math.max(0, Math.round(baseClicks * 0.2)),
@@ -298,9 +393,13 @@ export default function ReportsPage() {
   const maxVal = Math.max(10, ...points);
 
   const coords = points.map((val, idx) => {
-    const x = padding + (idx / Math.max(1, points.length - 1)) * (width - padding * 2);
+    const x =
+      padding + (idx / Math.max(1, points.length - 1)) * (width - padding * 2);
     const range = maxVal - minVal || 1;
-    const y = height - padding - ((val - minVal) / range) * (height - padding * 2) * zoomLevel;
+    const y =
+      height -
+      padding -
+      ((val - minVal) / range) * (height - padding * 2) * zoomLevel;
     const daily = dailyStats[idx];
     return {
       x,
@@ -316,13 +415,21 @@ export default function ReportsPage() {
     return idx === 0 ? `M ${c.x} ${c.y}` : `${acc} L ${c.x} ${c.y}`;
   }, "");
 
-  const fillD = `${pathD} L ${coords[coords.length - 1]?.x ?? width} ${height} L ${coords[0]?.x ?? 0} ${height} Z`;
+  const fillD = `${pathD} L ${coords[coords.length - 1]?.x ?? width} ${height} L ${
+    coords[0]?.x ?? 0
+  } ${height} Z`;
 
-  // Compute brand aggregations from ledger
-  const brandStatsMap = new Map<string, { name: string; slug: string; txns: number; profit: number }>();
+  // Compute brand aggregations from filtered ledger and conversions
+  const brandStatsMap = new Map<
+    string,
+    { name: string; slug: string; txns: number; profit: number }
+  >();
+
   for (const row of ledger) {
     const storeName = row.store?.name || "Partner Store";
-    const storeSlug = (row.store?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") || "general";
+    const storeSlug =
+      (row.store?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
+      "general";
     const existing = brandStatsMap.get(storeSlug) || {
       name: storeName,
       slug: storeSlug,
@@ -334,15 +441,59 @@ export default function ReportsPage() {
     brandStatsMap.set(storeSlug, existing);
   }
 
+  for (const conv of conversions) {
+    const storeName = conv.storeName || "Partner Store";
+    const storeSlug =
+      (conv.storeName || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
+      "general";
+    const isApproved =
+      conv.status === "PAID" ||
+      conv.status === "CONFIRMED" ||
+      conv.status === "confirmed";
+    const profitPaise = isApproved
+      ? Math.round((conv.commission || 0) * 100)
+      : 0;
+
+    if (!brandStatsMap.has(storeSlug)) {
+      brandStatsMap.set(storeSlug, {
+        name: storeName,
+        slug: storeSlug,
+        txns: 1,
+        profit: profitPaise,
+      });
+    }
+  }
+
   const brandRows =
     brandStatsMap.size > 0
       ? Array.from(brandStatsMap.values())
+      : stats.totalTransactions > 0
+      ? [
+          {
+            name: "Flipkart",
+            slug: "flipkart",
+            txns: stats.totalTransactions,
+            profit: stats.totalProfitPaise,
+          },
+          { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
+          { name: "Ajio", slug: "ajio", txns: 0, profit: 0 },
+          { name: "Amazon", slug: "amazon", txns: 0, profit: 0 },
+        ]
       : [
-          { name: "Flipkart", slug: "flipkart", txns: stats.totalTransactions, profit: stats.totalProfitPaise },
+          { name: "Flipkart", slug: "flipkart", txns: 0, profit: 0 },
           { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
           { name: "Ajio", slug: "ajio", txns: 0, profit: 0 },
           { name: "Amazon", slug: "amazon", txns: 0, profit: 0 },
         ];
+
+  // Dynamic conversion rate fallback: conv_rate = total_clicks > 0 ? ((total_orders / total_clicks) * 100).toFixed(2) + '%' : '0.0%'
+  const displayConvRate =
+    stats.totalClicks > 0
+      ? `${((stats.totalTransactions / stats.totalClicks) * 100).toFixed(2)}%`
+      : "0.0%";
+
+  const allTimeProfit =
+    stats.allTimeProfitPaise || balances.lifetime || stats.totalProfitPaise || 0;
 
   return (
     <div className="space-y-6 pt-2 pb-14 max-w-xl mx-auto">
@@ -352,7 +503,10 @@ export default function ReportsPage() {
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-200 font-bold text-amber-800">
               i
             </span>
-            <span>You are browsing as guest. Log in to view your personalized click analytics and orders.</span>
+            <span>
+              You are browsing as guest. Log in to view your personalized click
+              analytics and orders.
+            </span>
           </div>
           <Link
             href="/login?next=/reports"
@@ -393,7 +547,9 @@ export default function ReportsPage() {
               onClick={handleRefreshLive}
               className="flex items-center gap-1 rounded-full bg-white/20 hover:bg-white/30 px-2.5 py-1 text-[11px] font-bold text-white transition active:scale-95 disabled:opacity-50"
             >
-              <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`}
+              />
               <span>{syncing ? "Syncing..." : "Refresh Sync"}</span>
             </button>
             <button
@@ -408,7 +564,7 @@ export default function ReportsPage() {
 
         <div className="mt-3">
           <h1 className="num font-display text-3xl sm:text-4xl font-black tracking-tight text-white">
-            {formatINR(stats.totalProfitPaise)}
+            {formatINR(allTimeProfit)}
           </h1>
           <p className="mt-1 text-xs text-white/80">
             Total lifetime cash credited & in-progress across all links
@@ -418,12 +574,20 @@ export default function ReportsPage() {
         {/* Quick Balance Status */}
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/15 pt-3 text-xs">
           <div>
-            <p className="text-white/60 text-[10px] uppercase font-bold">Withdrawable Balance</p>
-            <p className="num text-base font-extrabold text-[#22c55e]">{formatINR(stats.availablePaise)}</p>
+            <p className="text-white/60 text-[10px] uppercase font-bold">
+              Withdrawable Balance
+            </p>
+            <p className="num text-base font-extrabold text-[#22c55e]">
+              {formatINR(balances.available || stats.availablePaise)}
+            </p>
           </div>
           <div>
-            <p className="text-white/60 text-[10px] uppercase font-bold">Pending Return Window</p>
-            <p className="num text-base font-extrabold text-amber-300">{formatINR(stats.pendingPaise)}</p>
+            <p className="text-white/60 text-[10px] uppercase font-bold">
+              Pending Return Window
+            </p>
+            <p className="num text-base font-extrabold text-amber-300">
+              {formatINR(balances.pending || stats.pendingPaise)}
+            </p>
           </div>
         </div>
       </div>
@@ -433,7 +597,9 @@ export default function ReportsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl animate-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-black/5 pb-3">
-              <h3 className="font-display font-extrabold text-base text-ink">Profit Breakup</h3>
+              <h3 className="font-display font-extrabold text-base text-ink">
+                Profit Breakup
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowBreakup(false)}
@@ -444,20 +610,32 @@ export default function ReportsPage() {
             </div>
             <div className="mt-4 space-y-3 text-xs">
               <div className="flex items-center justify-between rounded-xl bg-canvas p-3">
-                <span className="font-medium text-ink-soft">Confirmed (Available)</span>
-                <span className="num font-bold text-[#169443]">{formatINR(stats.availablePaise)}</span>
+                <span className="font-medium text-ink-soft">
+                  Confirmed (Available)
+                </span>
+                <span className="num font-bold text-[#169443]">
+                  {formatINR(balances.available || stats.availablePaise)}
+                </span>
               </div>
               <div className="flex items-center justify-between rounded-xl bg-canvas p-3">
-                <span className="font-medium text-ink-soft">Pending Confirmation</span>
-                <span className="num font-bold text-amber-600">{formatINR(stats.pendingPaise)}</span>
+                <span className="font-medium text-ink-soft">
+                  Pending Confirmation
+                </span>
+                <span className="num font-bold text-amber-600">
+                  {formatINR(balances.pending || stats.pendingPaise)}
+                </span>
               </div>
               <div className="flex items-center justify-between rounded-xl bg-canvas p-3">
-                <span className="font-medium text-ink-soft">Paid to Bank Account</span>
-                <span className="num font-bold text-ink">{formatINR(stats.paidPaise)}</span>
+                <span className="font-medium text-ink-soft">
+                  Paid to Bank Account
+                </span>
+                <span className="num font-bold text-ink">
+                  {formatINR(balances.paid || stats.paidPaise)}
+                </span>
               </div>
               <div className="flex items-center justify-between border-t border-black/5 pt-3 font-bold text-sm">
                 <span>Lifetime Total</span>
-                <span className="num text-ink">{formatINR(stats.totalProfitPaise)}</span>
+                <span className="num text-ink">{formatINR(allTimeProfit)}</span>
               </div>
             </div>
             <button
@@ -483,7 +661,9 @@ export default function ReportsPage() {
             onClick={handleRefreshLive}
             className="flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-[#169443] ring-1 ring-[#169443]/30 hover:bg-emerald-100 transition active:scale-95 disabled:opacity-50"
           >
-            <RefreshCw className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`h-3 w-3 ${syncing ? "animate-spin" : ""}`}
+            />
             <span>{syncing ? "Syncing..." : "Refresh Sync"}</span>
           </button>
         </div>
@@ -499,11 +679,15 @@ export default function ReportsPage() {
                 LIVE
               </span>
             </div>
-            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Clicks</p>
-            <p className="num font-display text-xl font-black text-ink">{stats.totalClicks.toLocaleString()}</p>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+              Clicks
+            </p>
+            <p className="num font-display text-xl font-black text-ink">
+              {stats.totalClicks.toLocaleString()}
+            </p>
           </div>
 
-          {/* Transactions (Green) */}
+          {/* Transactions / Orders (Green) */}
           <div className="rounded-2xl bg-white p-3.5 shadow-sm ring-1 ring-black/5">
             <div className="flex items-center justify-between">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-[#169443]">
@@ -513,8 +697,12 @@ export default function ReportsPage() {
                 ORDERS
               </span>
             </div>
-            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Orders</p>
-            <p className="num font-display text-xl font-black text-ink">{stats.totalTransactions}</p>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+              Orders
+            </p>
+            <p className="num font-display text-xl font-black text-ink">
+              {stats.totalTransactions}
+            </p>
           </div>
 
           {/* Profit (Cyan) */}
@@ -527,8 +715,12 @@ export default function ReportsPage() {
                 PROFIT
               </span>
             </div>
-            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Profit</p>
-            <p className="num font-display text-xl font-black text-ink">{formatINR(stats.totalProfitPaise)}</p>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+              Profit
+            </p>
+            <p className="num font-display text-xl font-black text-ink">
+              {formatINR(stats.totalProfitPaise)}
+            </p>
           </div>
 
           {/* Conversion Rate (Indigo) */}
@@ -541,8 +733,12 @@ export default function ReportsPage() {
                 RATIO
               </span>
             </div>
-            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">Conv. Rate</p>
-            <p className="num font-display text-xl font-black text-ink">{stats.convRate}</p>
+            <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
+              Conv. Rate
+            </p>
+            <p className="num font-display text-xl font-black text-ink">
+              {stats.convRate || displayConvRate}
+            </p>
           </div>
         </div>
       </div>
@@ -550,21 +746,32 @@ export default function ReportsPage() {
       {/* 3. Interactive Time-Based Performance SVG Chart */}
       <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-black/5">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/5 pb-3">
-          {/* Period Tabs */}
-          <div className="flex items-center gap-1 rounded-xl bg-canvas p-1 text-xs font-semibold">
-            {(["today", "7d", "30d", "all"] as const).map((p) => (
+          {/* Reactive Period Tabs: Today, Yesterday, 7 Days, 30 Days, All Time */}
+          <div className="flex items-center gap-1 rounded-xl bg-canvas p-1 text-xs font-semibold overflow-x-auto">
+            {(["today", "yesterday", "7d", "30d", "all"] as const).map((p) => (
               <button
                 key={p}
                 type="button"
                 onClick={() => {
                   setPeriod(p);
                   setActiveTooltip(null);
+                  loadData(false, undefined, p);
                 }}
-                className={`rounded-lg px-2.5 py-1 capitalize transition ${
-                  period === p ? "bg-white font-bold text-ink shadow-sm" : "text-ink-faint hover:text-ink"
+                className={`rounded-lg px-2.5 py-1 capitalize whitespace-nowrap transition ${
+                  period === p
+                    ? "bg-white font-bold text-ink shadow-sm"
+                    : "text-ink-faint hover:text-ink"
                 }`}
               >
-                {p === "today" ? "Today" : p === "7d" ? "7 Days" : p === "30d" ? "30 Days" : "All Time"}
+                {p === "today"
+                  ? "Today"
+                  : p === "yesterday"
+                  ? "Yesterday"
+                  : p === "7d"
+                  ? "7 Days"
+                  : p === "30d"
+                  ? "30 Days"
+                  : "All Time"}
               </button>
             ))}
           </div>
@@ -597,14 +804,19 @@ export default function ReportsPage() {
               aria-label="Refresh Data"
               className="rounded-lg bg-canvas p-1.5 text-ink-soft hover:bg-black/5 active:scale-95 transition"
             >
-              <RotateCcw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <RotateCcw
+                className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`}
+              />
             </button>
           </div>
         </div>
 
         {/* SVG Graph Rendering */}
         <div className="relative mt-4">
-          <svg viewBox={`0 0 ${width} ${height}`} className="w-full overflow-visible">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="w-full overflow-visible"
+          >
             <defs>
               <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="#169443" stopOpacity="0.35" />
@@ -613,15 +825,42 @@ export default function ReportsPage() {
             </defs>
 
             {/* Grid Lines */}
-            <line x1={padding} y1={padding} x2={width - padding} y2={padding} stroke="#f0f0f0" strokeDasharray="3 3" />
-            <line x1={padding} y1={height / 2} x2={width - padding} y2={height / 2} stroke="#f0f0f0" strokeDasharray="3 3" />
-            <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#f0f0f0" />
+            <line
+              x1={padding}
+              y1={padding}
+              x2={width - padding}
+              y2={padding}
+              stroke="#f0f0f0"
+              strokeDasharray="3 3"
+            />
+            <line
+              x1={padding}
+              y1={height / 2}
+              x2={width - padding}
+              y2={height / 2}
+              stroke="#f0f0f0"
+              strokeDasharray="3 3"
+            />
+            <line
+              x1={padding}
+              y1={height - padding}
+              x2={width - padding}
+              y2={height - padding}
+              stroke="#f0f0f0"
+            />
 
             {/* Filled Area */}
             <path d={fillD} fill="url(#profitGrad)" />
 
             {/* Stroke Line */}
-            <path d={pathD} fill="none" stroke="#169443" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d={pathD}
+              fill="none"
+              stroke="#169443"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
 
             {/* Data Circles */}
             {coords.map((c, idx) => (
@@ -647,7 +886,14 @@ export default function ReportsPage() {
               style={{ left: `${(activeTooltip.x / width) * 100}%` }}
             >
               {activeTooltip.label}: {activeTooltip.val} clicks
-              {activeTooltip.profitPaise > 0 ? ` • ${formatINR(activeTooltip.profitPaise)}` : ""}
+              {activeTooltip.profitPaise > 0
+                ? ` • ${formatINR(activeTooltip.profitPaise)}`
+                : ""}
+              {activeTooltip.orders > 0
+                ? ` • ${activeTooltip.orders} order${
+                    activeTooltip.orders > 1 ? "s" : ""
+                  }`
+                : ""}
             </div>
           )}
 
@@ -662,7 +908,8 @@ export default function ReportsPage() {
         {/* Live Simulation Quick Button */}
         <div className="mt-5 border-t border-black/5 pt-3.5 flex items-center justify-between">
           <p className="text-[11px] text-ink-soft">
-            Testing conversions? Click below to simulate a real order conversion:
+            Testing conversions? Click below to simulate a real order
+            conversion:
           </p>
           <button
             type="button"
@@ -685,7 +932,9 @@ export default function ReportsPage() {
               Performance by All Brands
             </h2>
           </div>
-          <span className="text-[11px] font-semibold text-ink-soft">Real-time ledger</span>
+          <span className="text-[11px] font-semibold text-ink-soft">
+            Real-time ledger
+          </span>
         </div>
 
         <div className="overflow-x-auto">
@@ -703,16 +952,23 @@ export default function ReportsPage() {
                 <tr key={b.name} className="hover:bg-canvas/50 transition">
                   <td className="py-3 px-4 font-bold text-ink">
                     <div className="flex items-center gap-2">
-                      <BrandLogo slug={b.slug} name={b.name} size={18} className="h-4.5 w-4.5 rounded" />
+                      <BrandLogo
+                        slug={b.slug}
+                        name={b.name}
+                        size={18}
+                        className="h-4.5 w-4.5 rounded"
+                      />
                       <span>{b.name}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-2 text-center font-semibold text-ink">{b.txns}</td>
+                  <td className="py-3 px-2 text-center font-semibold text-ink">
+                    {b.txns}
+                  </td>
                   <td className="num py-3 px-3 text-right font-black text-[#169443]">
                     {formatINR(b.profit)}
                   </td>
                   <td className="num py-3 px-4 text-right font-semibold text-ink-soft">
-                    {b.txns > 0 ? stats.convRate : "0.0%"}
+                    {b.txns > 0 ? stats.convRate || displayConvRate : "0.0%"}
                   </td>
                 </tr>
               ))}
@@ -720,9 +976,15 @@ export default function ReportsPage() {
             <tfoot>
               <tr className="bg-emerald-50/50 font-black text-ink border-t border-black/10">
                 <td className="py-3 px-4 uppercase text-[11px]">Total</td>
-                <td className="py-3 px-2 text-center">{stats.totalTransactions}</td>
-                <td className="num py-3 px-3 text-right text-[#169443]">{formatINR(stats.totalProfitPaise)}</td>
-                <td className="num py-3 px-4 text-right">{stats.convRate}</td>
+                <td className="py-3 px-2 text-center">
+                  {stats.totalTransactions}
+                </td>
+                <td className="num py-3 px-3 text-right text-[#169443]">
+                  {formatINR(stats.totalProfitPaise)}
+                </td>
+                <td className="num py-3 px-4 text-right">
+                  {stats.convRate || displayConvRate}
+                </td>
               </tr>
             </tfoot>
           </table>
