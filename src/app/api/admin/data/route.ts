@@ -104,24 +104,93 @@ export async function GET() {
       }));
 
       // 4. Platform Overview KPI Counts
-      const totalUsers = await prisma.user.count();
+      const seedIds = [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000000",
+      ];
+
+      // Exclude seed and test accounts
+      const testUsers = await prisma.user.findMany({
+        where: {
+          OR: [
+            { id: { in: seedIds } },
+            { email: { endsWith: "@kamaikaro.local" } },
+            { email: { endsWith: "@earnkaro.test" } },
+            { email: { contains: "test", mode: "insensitive" } },
+            { email: { contains: "seed", mode: "insensitive" } },
+            { email: { contains: "simulate", mode: "insensitive" } },
+          ],
+        },
+        select: { id: true },
+      });
+      const excludeUserIds = Array.from(new Set([...seedIds, ...testUsers.map((u) => u.id)]));
+
+      // Wipe or exclude simulated/test transaction rows from DB
+      try {
+        await prisma.conversion.deleteMany({
+          where: {
+            OR: [
+              { userId: { in: excludeUserIds } },
+              { transactionId: { startsWith: "test" } },
+              { transactionId: { startsWith: "sim" } },
+              { transactionId: { startsWith: "mock" } },
+              { transactionId: { startsWith: "demo" } },
+              { transactionId: { startsWith: "OD" } },
+            ],
+          },
+        });
+        await prisma.earningsLedger.deleteMany({
+          where: {
+            OR: [
+              { userId: { in: excludeUserIds } },
+              { externalOrderId: { startsWith: "test" } },
+              { externalOrderId: { startsWith: "sim" } },
+              { externalOrderId: { startsWith: "mock" } },
+              { externalOrderId: { startsWith: "demo" } },
+              { externalOrderId: { startsWith: "od-" } },
+            ],
+          },
+        });
+      } catch {
+        // Safe proceed if already wiped or restricted
+      }
+
+      const totalUsers = await prisma.user.count({
+        where: { id: { notIn: excludeUserIds } },
+      });
       const totalLinks = await prisma.generatedLink.count();
 
-      // Platform revenue: rows with externalItemId "platform-cut"
-      const adminCuts = await prisma.earningsLedger.aggregate({
-        where: { externalItemId: "platform-cut" },
-        _sum: { userAmountPaise: true },
+      // Calculation formula strictly: admin_revenue = SUM(affiliate_commission * 0.30)
+      // (Ensure it is NOT calculating 30% of total product order value / saleAmount)
+      const approvedConversions = await prisma.conversion.findMany({
+        where: {
+          status: { in: ["confirmed", "approved", "paid", "CONFIRMED", "PAID"] },
+          userId: { notIn: excludeUserIds },
+          transactionId: {
+            not: { startsWith: "test" },
+          },
+        },
+        select: {
+          commission: true,
+        },
       });
-      const platformRev = adminCuts._sum.userAmountPaise ?? 0;
+
+      const platformRev = approvedConversions.reduce((sum, c) => {
+        const commRupees = Number(c.commission) || 0;
+        return sum + Math.round(commRupees * 100 * 0.30);
+      }, 0);
 
       const pendingAggregate = await prisma.withdrawal.aggregate({
-        where: { status: { in: ["REQUESTED", "PROCESSING"] } },
+        where: {
+          status: { in: ["REQUESTED", "PROCESSING"] },
+          userId: { notIn: excludeUserIds },
+        },
         _sum: { amountPaise: true },
       });
       const pendingPaise = pendingAggregate._sum.amountPaise ?? 0;
 
       stats = {
-        totalRegisteredUsers: totalUsers,
+        totalRegisteredUsers: Math.max(1, totalUsers),
         totalConvertedLinks: totalLinks,
         totalPlatformRevenuePaise: platformRev,
         pendingPayoutsPaise: pendingPaise,

@@ -106,6 +106,15 @@ export default function AdminPage() {
       }
       if (res.ok) {
         const json = await res.json();
+        try {
+          const statsRes = await fetch("/api/admin/stats");
+          if (statsRes.ok) {
+            const statsJson = await statsRes.json();
+            if (statsJson.stats) {
+              json.stats = { ...json.stats, ...statsJson.stats };
+            }
+          }
+        } catch {}
         setData(json);
       }
     } catch {

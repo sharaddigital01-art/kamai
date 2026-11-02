@@ -756,6 +756,8 @@ export function filterMockDeals(f: DealFilters): DealPage {
 }
 
 // User Profile
+export const ADMIN_USER_ID = "00000000-0000-0000-0000-000000000000";
+
 export const DEMO_USER: User = {
   id: "00000000-0000-0000-0000-000000000001",
   email: "demo@kamai.local",
@@ -1154,7 +1156,36 @@ export function deleteMockDeal(dealId: string) {
 export function getAdminPlatformOverview() {
   const registeredUsersCount = getMockUsersCount();
   const totalConvertedLinks = g.mockLinks ? g.mockLinks.size : 0;
-  const platformRevenuePaise = (g as any).adminRevenuePaise || 0;
+
+  // Strict formula: admin_revenue = SUM(affiliate_commission * 0.30)
+  // Ensure it is NOT calculating 30% of total product order value.
+  // Wipes/excludes all simulated/test transaction rows and seed accounts.
+  let platformRevenuePaise = 0;
+  if (g.mockConversions) {
+    const seedIds = new Set([DEMO_USER.id, ADMIN_USER_ID]);
+    const realApproved = Array.from(g.mockConversions.values()).filter((c) => {
+      if (c.userId && seedIds.has(c.userId)) return false;
+      if ((c as any).is_test === true || (c as any).isTest === true) return false;
+      const tx = String(c.transactionId || "").toLowerCase();
+      if (
+        tx.startsWith("test") ||
+        tx.startsWith("sim") ||
+        tx.startsWith("demo") ||
+        tx.startsWith("mock") ||
+        tx.startsWith("od-")
+      ) {
+        return false;
+      }
+      const st = String(c.status || "").toLowerCase();
+      return st === "confirmed" || st === "approved" || st === "paid";
+    });
+
+    platformRevenuePaise = realApproved.reduce((sum, c) => {
+      const commRupees = Number(c.commission) || 0;
+      return sum + Math.round(commRupees * 100 * 0.30);
+    }, 0);
+  }
+
   const withdrawals = getLiveWithdrawals();
   const pendingPayoutsPaise = withdrawals
     .filter((w) => w.status === "REQUESTED" || w.status === "PROCESSING")
@@ -1287,11 +1318,14 @@ export function upsertMockConversion(data: {
   status: string;
   subid?: string | null;
   userId?: string | null;
+  createdAt?: string | Date;
 }): { conversion: MockConversionRecord; isNew: boolean } {
   if (!g.mockConversions) g.mockConversions = new Map();
   const txId = data.transactionId;
   const existing = g.mockConversions.get(txId);
   const now = new Date();
+  const txDate = data.createdAt ? new Date(data.createdAt) : now;
+  const safeDate = isNaN(txDate.getTime()) ? now : txDate;
   const effectiveUserId = data.userId || DEMO_USER.id;
 
   const normalizedStatus = data.status.toLowerCase();
@@ -1352,7 +1386,7 @@ export function upsertMockConversion(data: {
     orderAmountPaise: Math.round(data.saleAmount * 100),
     userAmountPaise: userEarningsPaise,
     status: ledgerStatus,
-    createdAt: existing ? existing.createdAt : now,
+    createdAt: existing ? existing.createdAt : safeDate,
   };
 
   if (existingLedgerIdx >= 0) {
@@ -1373,7 +1407,7 @@ export function upsertMockConversion(data: {
     status: data.status,
     subid: data.subid || null,
     userId: effectiveUserId,
-    createdAt: existing?.createdAt || now,
+    createdAt: existing?.createdAt || safeDate,
     updatedAt: now,
   };
 

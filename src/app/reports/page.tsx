@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   TrendingUp,
@@ -52,7 +52,7 @@ interface DailyStat {
 
 type Period = "today" | "yesterday" | "7d" | "30d" | "all";
 
-function getDateBoundaries(p: Period) {
+function getTabDateBounds(p: Period): { start: Date | null; end: Date | null } {
   const now = new Date();
   if (p === "today") {
     const start = new Date(
@@ -64,7 +64,7 @@ function getDateBoundaries(p: Period) {
       0,
       0
     );
-    return { startDate: start.toISOString(), endDate: now.toISOString() };
+    return { start, end: now };
   }
   if (p === "yesterday") {
     const start = new Date(
@@ -85,7 +85,7 @@ function getDateBoundaries(p: Period) {
       59,
       999
     );
-    return { startDate: start.toISOString(), endDate: end.toISOString() };
+    return { start, end };
   }
   if (p === "7d") {
     const start = new Date(
@@ -97,7 +97,7 @@ function getDateBoundaries(p: Period) {
       0,
       0
     );
-    return { startDate: start.toISOString(), endDate: now.toISOString() };
+    return { start, end: now };
   }
   if (p === "30d") {
     const start = new Date(
@@ -109,13 +109,24 @@ function getDateBoundaries(p: Period) {
       0,
       0
     );
-    return { startDate: start.toISOString(), endDate: now.toISOString() };
+    return { start, end: now };
+  }
+  return { start: null, end: null };
+}
+
+function getDateBoundaries(p: Period) {
+  const { start, end } = getTabDateBounds(p);
+  if (start && end) {
+    return { startDate: start.toISOString(), endDate: end.toISOString() };
   }
   return {};
 }
 
 export default function ReportsPage() {
   const [period, setPeriod] = useState<Period>("30d");
+  const periodRef = useRef<Period>(period);
+  periodRef.current = period;
+
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showBreakup, setShowBreakup] = useState(false);
   const [activeTooltip, setActiveTooltip] = useState<{
@@ -128,7 +139,7 @@ export default function ReportsPage() {
   } | null>(null);
 
   // Instant synchronous state from memory / SWR cache (<100ms / 0ms)
-  const initialCache = getCachedReportsData();
+  const initialCache = getCachedReportsData(period);
   const cachedUser = getCachedUser();
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
@@ -208,7 +219,7 @@ export default function ReportsPage() {
   async function loadData(
     forceBypass = false,
     userOverride?: { id: string; subId?: string | null },
-    targetPeriod: Period = period
+    targetPeriod: Period = periodRef.current
   ) {
     try {
       const timestamp = Date.now();
@@ -230,7 +241,7 @@ export default function ReportsPage() {
       const url = qs ? `/api/reports?${qs}` : "/api/reports";
       const cacheKey = `${CACHE_KEY_REPORTS}_${targetUserId || "self"}_${targetPeriod}`;
 
-      const applyData = (data: any) => {
+      const applyData = (data: any, sourcePeriod: Period) => {
         setIsAuthenticated(Boolean(data.authenticated));
         if (data.user) {
           setCurrentUser({
@@ -241,6 +252,13 @@ export default function ReportsPage() {
           });
         }
         if (data.balances) setBalances(data.balances);
+
+        // Strictly prevent background refetch or responses for a different range
+        // from overwriting the currently active tab's view
+        if (sourcePeriod !== periodRef.current) {
+          return;
+        }
+
         if (data.stats) setStats(data.stats);
         if (Array.isArray(data.ledger)) setLedger(data.ledger);
         if (Array.isArray(data.conversions)) setConversions(data.conversions);
@@ -268,16 +286,16 @@ export default function ReportsPage() {
           maxAgeMs: 60 * 1000,
           onBackgroundUpdate: (fresh) => {
             if (fresh) {
-              setCachedReportsData(fresh);
-              applyData(fresh);
+              setCachedReportsData(fresh, targetPeriod);
+              applyData(fresh, targetPeriod);
             }
           },
         }
       );
 
       if (data) {
-        setCachedReportsData(data);
-        applyData(data);
+        setCachedReportsData(data, targetPeriod);
+        applyData(data, targetPeriod);
       }
     } catch {
       if (!initialCache) {
@@ -287,12 +305,13 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    loadData(false, undefined, period);
+    loadData(false, undefined, periodRef.current);
   }, []);
 
   async function handleRefreshLive() {
     setSyncing(true);
     setSyncMessage(null);
+    const activeP = periodRef.current;
     try {
       const timestamp = Date.now();
       const params = new URLSearchParams();
@@ -317,12 +336,12 @@ export default function ReportsPage() {
       } else {
         setSyncMessage("Live sync complete.");
       }
-      // Force immediate database re-read for that specific userId with fresh timestamp and current period
-      await loadData(true, undefined, period);
+      // Force immediate database re-read strictly for the active tab's period
+      await loadData(true, undefined, activeP);
     } catch (err) {
       console.warn("Error refreshing live Cuelinks data:", err);
       setSyncMessage("Refreshed local stats.");
-      await loadData(true, undefined, period);
+      await loadData(true, undefined, activeP);
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncMessage(null), 4000);
@@ -395,13 +414,31 @@ export default function ReportsPage() {
     coords[0]?.x ?? 0
   } ${height} Z`;
 
+  // Filter ledger and conversions strictly by active tab's timestamp window
+  const { start: tabStart, end: tabEnd } = getTabDateBounds(period);
+
+  const isInTabWindow = (d: any): boolean => {
+    if (!tabStart && !tabEnd) return true;
+    const dateVal =
+      d.createdAt || d.created_at || d.transaction_date || d.timestamp || d.date;
+    if (!dateVal) return false;
+    const t = new Date(dateVal).getTime();
+    if (isNaN(t)) return false;
+    if (tabStart && t < tabStart.getTime()) return false;
+    if (tabEnd && t > tabEnd.getTime()) return false;
+    return true;
+  };
+
+  const periodLedger = ledger.filter(isInTabWindow);
+  const periodConversions = conversions.filter(isInTabWindow);
+
   // Compute brand aggregations from filtered ledger and conversions
   const brandStatsMap = new Map<
     string,
     { name: string; slug: string; txns: number; profit: number }
   >();
 
-  for (const row of ledger) {
+  for (const row of periodLedger) {
     const storeName = row.store?.name || "Partner Store";
     const storeSlug =
       (row.store?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
@@ -417,7 +454,7 @@ export default function ReportsPage() {
     brandStatsMap.set(storeSlug, existing);
   }
 
-  for (const conv of conversions) {
+  for (const conv of periodConversions) {
     const storeName = conv.storeName || "Partner Store";
     const storeSlug =
       (conv.storeName || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
@@ -434,6 +471,11 @@ export default function ReportsPage() {
         txns: 1,
         profit: profitPaise,
       });
+    } else {
+      const existing = brandStatsMap.get(storeSlug)!;
+      existing.txns += 1;
+      existing.profit += profitPaise;
+      brandStatsMap.set(storeSlug, existing);
     }
   }
 
@@ -443,15 +485,17 @@ export default function ReportsPage() {
     0
   );
   const totalBrandTxns = Math.max(
-    stats.totalTransactions,
+    period === "all" ? stats.totalTransactions : periodLedger.length + periodConversions.length,
     Array.from(brandStatsMap.values()).reduce((sum, b) => sum + (b.txns || 0), 0)
   );
 
   // The actual profit to display on the PROFIT card and TOTAL table row
-  const displayProfitPaise = Math.max(
-    safePaise(stats.totalProfitPaise),
-    totalBrandProfit
-  );
+  const displayProfitPaise =
+    period === "all"
+      ? Math.max(safePaise(stats.totalProfitPaise), totalBrandProfit)
+      : totalBrandProfit > 0
+      ? totalBrandProfit
+      : safePaise(stats.totalProfitPaise);
 
   const brandRows =
     brandStatsMap.size > 0
@@ -743,7 +787,15 @@ export default function ReportsPage() {
                 type="button"
                 onClick={() => {
                   setPeriod(p);
+                  periodRef.current = p;
                   setActiveTooltip(null);
+                  const pCache = getCachedReportsData(p);
+                  if (pCache?.stats) {
+                    setStats(pCache.stats);
+                    if (Array.isArray(pCache.ledger)) setLedger(pCache.ledger);
+                    if (Array.isArray(pCache.conversions)) setConversions(pCache.conversions);
+                    if (Array.isArray(pCache.dailyStats)) setDailyStats(pCache.dailyStats);
+                  }
                   loadData(false, undefined, p);
                 }}
                 className={`rounded-lg px-2.5 py-1 capitalize whitespace-nowrap transition ${

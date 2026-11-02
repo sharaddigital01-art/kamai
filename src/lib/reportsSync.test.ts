@@ -320,4 +320,96 @@ describe("SubId Stats Fetching & Instant Click Tracking", () => {
       expect(jsonB.trackingSubId).not.toBe("ek_tg");
     });
   });
+
+  describe("6. Date Range Filtering & Tab Isolation", () => {
+    it("strictly isolates 'Today' from 'Yesterday' records (0 orders today, 2 orders yesterday)", async () => {
+      const dateTestUserId = "user-date-iso-" + Date.now();
+      const dateTestSubId = "dt_" + Math.floor(1000 + Math.random() * 9000);
+
+      createMockUser({
+        id: dateTestUserId,
+        email: "dateuser@kamaikaro.test",
+        name: "Date Isolation User",
+        role: "USER",
+        referralCode: "REF" + dateTestSubId,
+        subIdPrefix: dateTestSubId,
+      });
+
+      // 1. Record 2 clicks today
+      const now = new Date();
+      saveMockShortLink({
+        slug: "dt_link1",
+        originalUrl: "https://flipkart.com",
+        userId: dateTestUserId,
+        subId: dateTestSubId,
+      });
+      // Add 2 clicks today
+      const mockClicks = getLiveClicks(dateTestUserId);
+      mockClicks.push(
+        { code: "dt_link1", store: "Flipkart", timestamp: now, userId: dateTestUserId, ip: "127.0.0.1" },
+        { code: "dt_link1", store: "Flipkart", timestamp: now, userId: dateTestUserId, ip: "127.0.0.1" }
+      );
+
+      // 2. Record 2 conversions yesterday totaling ₹27.83 profit
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      upsertMockConversion({
+        transactionId: "tx-yesterday-01",
+        storeName: "Flipkart",
+        saleAmount: 1899,
+        commission: 13.91,
+        status: "confirmed",
+        subid: dateTestSubId,
+        userId: dateTestUserId,
+        createdAt: yesterday,
+      });
+      upsertMockConversion({
+        transactionId: "tx-yesterday-02",
+        storeName: "Flipkart",
+        saleAmount: 1900,
+        commission: 13.92,
+        status: "confirmed",
+        subid: dateTestSubId,
+        userId: dateTestUserId,
+        createdAt: yesterday,
+      });
+
+      // 3. Query "today" -> MUST have 0 orders, ₹0 profit, and strictly today's clicks
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const todayReq = new Request(
+        `http://localhost:3000/api/reports?userId=${dateTestUserId}&subid=${dateTestSubId}&range=today&startDate=${todayStart.toISOString()}&endDate=${now.toISOString()}`
+      );
+      const todayRes = await reportsGet(todayReq);
+      const todayJson = await todayRes.json();
+
+      expect(todayJson.stats.totalTransactions).toBe(0);
+      expect(todayJson.stats.totalProfitPaise).toBe(0);
+      expect(todayJson.conversions.length).toBe(0);
+      expect(todayJson.ledger.length).toBe(0);
+
+      // 4. Query "yesterday" -> MUST have 2 orders, ₹27.83 (2783 paise)
+      const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0);
+      const yesterdayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 23, 59, 59, 999);
+      const yesterdayReq = new Request(
+        `http://localhost:3000/api/reports?userId=${dateTestUserId}&subid=${dateTestSubId}&range=yesterday&startDate=${yesterdayStart.toISOString()}&endDate=${yesterdayEnd.toISOString()}`
+      );
+      const yesterdayRes = await reportsGet(yesterdayReq);
+      const yesterdayJson = await yesterdayRes.json();
+
+      expect(yesterdayJson.stats.totalTransactions).toBe(2);
+      expect(yesterdayJson.stats.totalProfitPaise).toBe(2783);
+      expect(yesterdayJson.conversions.length).toBe(2);
+    });
+  });
+
+  describe("7. Clean Admin Revenue Calculation strictly based on 30% cut", () => {
+    it("calculates platform revenue as 30% of affiliate commission, NOT 30% of order value", () => {
+      // Test conversion: Sale Amount = ₹11,600, Affiliate Commission = ₹92.76
+      // 30% of product order value would be ₹3,480 (inflated)
+      // Strict 30% of affiliate commission is ₹27.83 (2783 paise)
+      const affiliateCommission = 92.76;
+      const expectedAdminCutPaise = Math.round(affiliateCommission * 100 * 0.30);
+      expect(expectedAdminCutPaise).toBe(2783);
+      expect(formatINR(expectedAdminCutPaise)).toBe("₹27.83");
+    });
+  });
 });

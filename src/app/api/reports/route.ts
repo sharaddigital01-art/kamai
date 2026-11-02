@@ -42,9 +42,14 @@ async function handleReports(req: Request) {
   let rangeStart: Date | null = null;
   let rangeEnd: Date | null = null;
 
-  if (queryStartDate) {
-    rangeStart = new Date(queryStartDate);
-    rangeEnd = queryEndDate ? new Date(queryEndDate) : now;
+  if (queryRange === "all") {
+    rangeStart = null;
+    rangeEnd = null;
+  } else if (queryStartDate) {
+    const s = new Date(queryStartDate);
+    rangeStart = isNaN(s.getTime()) ? null : s;
+    const e = queryEndDate ? new Date(queryEndDate) : now;
+    rangeEnd = isNaN(e.getTime()) ? now : e;
   } else if (queryRange === "today") {
     rangeStart = new Date(
       now.getFullYear(),
@@ -98,7 +103,6 @@ async function handleReports(req: Request) {
     );
     rangeEnd = now;
   } else {
-    // "all"
     rangeStart = null;
     rangeEnd = null;
   }

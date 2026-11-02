@@ -425,6 +425,15 @@ export async function syncCuelinksTransactions(
       options.filterUserId ||
       DEMO_USER.id;
 
+    const txDateRaw =
+      tx.created_at ||
+      tx.transaction_date ||
+      tx.date ||
+      tx.added_on ||
+      tx.created_date;
+    const txCreatedAt = txDateRaw ? new Date(txDateRaw) : now;
+    const safeCreatedAt = isNaN(txCreatedAt.getTime()) ? now : txCreatedAt;
+
     const totalCommissionPaise = Math.round(commission * 100);
     const userEarningsPaise = Math.round(totalCommissionPaise * userRatio);
     const orderAmountPaise = Math.round(saleAmount * 100);
@@ -442,6 +451,7 @@ export async function syncCuelinksTransactions(
             status,
             subid: subId || null,
             userId: resolvedUserId,
+            createdAt: safeCreatedAt,
           },
           update: {
             storeName,
@@ -496,6 +506,7 @@ export async function syncCuelinksTransactions(
               orderAmountPaise,
               commissionPaise: totalCommissionPaise,
               userAmountPaise: userEarningsPaise,
+              createdAt: safeCreatedAt,
               pendingAt: now,
               confirmedAt: ledgerStatus === "CONFIRMED" ? now : null,
               rejectedAt: ledgerStatus === "REJECTED" ? now : null,
@@ -537,6 +548,7 @@ export async function syncCuelinksTransactions(
       status,
       subid: subId || null,
       userId: resolvedUserId,
+      createdAt: safeCreatedAt,
     });
 
     synced++;
