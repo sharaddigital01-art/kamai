@@ -944,6 +944,7 @@ export function recordAmazonConversion(data: {
 
   const txDate = data.date || new Date();
   const effectiveUserId = data.userId || DEMO_USER.id;
+  const userBalances = getUserBalances(effectiveUserId);
 
   const ledgerRow: MockLedgerRow = {
     id: data.txId,
@@ -959,11 +960,11 @@ export function recordAmazonConversion(data: {
   if (existingIdx >= 0) {
     const prev = g.mockLedger[existingIdx]!;
     if (prev.status === "CONFIRMED") {
-      g.mockBalances.available = Math.max(0, g.mockBalances.available - prev.userAmountPaise);
-      g.mockBalances.lifetime = Math.max(0, g.mockBalances.lifetime - prev.userAmountPaise);
+      userBalances.available = Math.max(0, userBalances.available - prev.userAmountPaise);
+      userBalances.lifetime = Math.max(0, userBalances.lifetime - prev.userAmountPaise);
     } else if (prev.status === "PENDING") {
-      g.mockBalances.pending = Math.max(0, g.mockBalances.pending - prev.userAmountPaise);
-      g.mockBalances.lifetime = Math.max(0, g.mockBalances.lifetime - prev.userAmountPaise);
+      userBalances.pending = Math.max(0, userBalances.pending - prev.userAmountPaise);
+      userBalances.lifetime = Math.max(0, userBalances.lifetime - prev.userAmountPaise);
     }
     g.mockLedger[existingIdx] = ledgerRow;
   } else {
@@ -971,11 +972,17 @@ export function recordAmazonConversion(data: {
   }
 
   if (data.status === "CONFIRMED") {
-    g.mockBalances.available += data.userProfitPaise;
-    g.mockBalances.lifetime += data.userProfitPaise;
+    userBalances.available += data.userProfitPaise;
+    userBalances.lifetime += data.userProfitPaise;
   } else if (data.status === "PENDING") {
-    g.mockBalances.pending += data.userProfitPaise;
-    g.mockBalances.lifetime += data.userProfitPaise;
+    userBalances.pending += data.userProfitPaise;
+    userBalances.lifetime += data.userProfitPaise;
+  }
+
+  if (effectiveUserId === DEMO_USER.id && g.mockBalances) {
+    g.mockBalances.available = userBalances.available;
+    g.mockBalances.pending = userBalances.pending;
+    g.mockBalances.lifetime = userBalances.lifetime;
   }
 
   // Also add to mockConversions so admin overview metrics see it

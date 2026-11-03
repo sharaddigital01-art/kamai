@@ -131,4 +131,60 @@ describe("Amazon CSV Sync Parser & Reconciler", () => {
     const overview = getAdminPlatformOverview();
     expect(overview.totalPlatformRevenuePaise).toBeGreaterThan(0);
   });
+
+  it("matches ascsubtag from Telegram automation (e.g. Fcz84F_tg), credits 70% PENDING to user ledger, and 30% to platform revenue", async () => {
+    vi.spyOn(auth, "getApiUser").mockResolvedValue(adminUser as any);
+
+    const telegramTargetUserId = "user-tg-affiliate-9988";
+    // Register mock user with subIdPrefix: "Fcz84F"
+    const g = globalThis as any;
+    if (!g.mockUsers) g.mockUsers = new Map();
+    g.mockUsers.set(telegramTargetUserId, {
+      id: telegramTargetUserId,
+      email: "tguser@example.com",
+      name: "TG Deal Runner",
+      role: "USER",
+      subIdPrefix: "Fcz84F",
+      referralCode: "FCZ84F",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // Amazon CSV row has Tracking Tag / ascsubtag matching the dynamic short tag: Fcz84F_tg
+    const csvContent = [
+      "Order ID,Tracking Tag / ascsubtag,Item Price,Advertising Fee (Commission),Date,Status",
+      `402-9988776-0000001,Fcz84F_tg,"₹5,000.00","₹250.00",2026-11-03,Pending`,
+    ].join("\n");
+
+    const req = new Request("http://localhost:3000/api/admin/amazon-sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csvText: csvContent }),
+    });
+
+    const res = await amazonSyncPost(req);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+
+    expect(data.success).toBe(true);
+    expect(data.processedCount).toBe(1);
+
+    // Total gross commission: ₹250
+    // User profit (70%): ₹250 * 0.70 = ₹175
+    // Admin cut (30%): ₹250 * 0.30 = ₹75
+    expect(data.totalCommission).toBe(250);
+    expect(data.totalUserProfit).toBe(175);
+    expect(data.totalAdminCut).toBe(75);
+
+    // Verify EarningsLedger was updated with Amazon record for this user
+    const ledger = getLiveLedger();
+    const tgOrder = ledger.find((r) => r.externalOrderId === "402-9988776-0000001");
+    expect(tgOrder).toBeDefined();
+    expect(tgOrder?.userAmountPaise).toBe(17500); // ₹175.00
+    expect(tgOrder?.status).toBe("PENDING");
+
+    // Verify user balances include this pending commission
+    const balances = getUserBalances(telegramTargetUserId);
+    expect(balances.pending).toBeGreaterThanOrEqual(17500);
+  });
 });
