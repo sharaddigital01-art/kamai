@@ -488,6 +488,7 @@ export interface MockUserRecord {
   name: string;
   role: "USER" | "ADMIN";
   isVerified?: boolean;
+  password?: string;
   referralCode: string;
   subIdPrefix: string;
   createdAt: Date;
@@ -1237,6 +1238,7 @@ export function createMockUser(userData: {
   name: string;
   role: "USER" | "ADMIN";
   isVerified?: boolean;
+  password?: string;
   referralCode: string;
   subIdPrefix: string;
 }): MockUserRecord {
@@ -1246,10 +1248,22 @@ export function createMockUser(userData: {
     email: userData.email.toLowerCase().trim(),
     phone: userData.phone || null,
     isVerified: userData.isVerified !== undefined ? userData.isVerified : true,
+    password: userData.password,
     createdAt: new Date(),
   };
   g.mockUsers.set(user.email, user);
   return user;
+}
+
+export function updateMockUserPassword(emailOrId: string, password: string): boolean {
+  if (!g.mockUsers || !emailOrId) return false;
+  const user = findMockUserByEmail(emailOrId) || findMockUserById(emailOrId);
+  if (user) {
+    user.password = password;
+    g.mockUsers.set(user.email, user);
+    return true;
+  }
+  return false;
 }
 
 export function getMockUsersCount(): number {

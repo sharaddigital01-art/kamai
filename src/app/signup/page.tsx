@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 import {
   Lock,
   Mail,
@@ -240,6 +241,7 @@ function SignupForm() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           otp: enteredOtp,
+          password: password || undefined,
         }),
       });
 
@@ -248,6 +250,27 @@ function SignupForm() {
       if (!res.ok) {
         setError(data.error || "Invalid verification code. Please check your email and try again.");
         return;
+      }
+
+      // Ensure password is permanently committed to Supabase Auth once session is confirmed
+      if (password && typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+        try {
+          const supabase = createSupabaseBrowser();
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            await supabase.auth.updateUser({ password });
+          } else {
+            const { data: signInData } = await supabase.auth.signInWithPassword({
+              email: email.trim().toLowerCase(),
+              password,
+            });
+            if (signInData?.user) {
+              await supabase.auth.updateUser({ password });
+            }
+          }
+        } catch (clientSupaErr) {
+          console.warn("Client Supabase updateUser notice:", clientSupaErr);
+        }
       }
 
       setSuccess(true);

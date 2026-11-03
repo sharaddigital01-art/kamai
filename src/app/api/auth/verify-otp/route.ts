@@ -12,6 +12,8 @@ import {
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
 import { verifyUnifiedOtp } from "@/lib/otp";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/mockData";
 
 export const runtime = "nodejs";
 
@@ -20,6 +22,7 @@ const VerifyOtpSchema = z.object({
   emailOrPhone: z.string().trim().optional(),
   email: z.string().trim().optional(),
   phone: z.string().trim().optional(),
+  password: z.string().optional(),
   otp: z.string().trim().min(1, "Please enter the verification code"),
 });
 
@@ -34,7 +37,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { identifier, emailOrPhone, email, phone, otp } = result.data;
+    const { identifier, emailOrPhone, email, phone, password: directPassword, otp } = result.data;
     const cleanEmail = (email || identifier || emailOrPhone || phone || "").trim().toLowerCase();
     const cleanInputOtp = otp.trim();
 
@@ -114,6 +117,8 @@ export async function POST(req: Request) {
       }
     }
 
+    const enteredPassword = (directPassword || pending.password || "").trim();
+
     // Auto-confirm verified user in Supabase Auth & PostgreSQL
     const adminClient = getSupabaseAdmin();
     if (adminClient) {
@@ -127,12 +132,30 @@ export async function POST(req: Request) {
           if (found) supaUserId = found.id;
         }
         if (supaUserId) {
-          await adminClient.auth.admin.updateUserById(supaUserId, {
-            email_confirm: true,
-          });
+          const updatePayload: any = { email_confirm: true };
+          if (enteredPassword) {
+            updatePayload.password = enteredPassword;
+          }
+          await adminClient.auth.admin.updateUserById(supaUserId, updatePayload);
         }
       } catch (adminErr: any) {
         console.warn("Supabase admin confirm in verify-otp notice:", adminErr?.message || adminErr);
+      }
+    }
+
+    // Call supabase.auth.updateUser({ password: enteredPassword }) once session is confirmed
+    if (isSupabaseConfigured() && enteredPassword) {
+      try {
+        const supabase = await createSupabaseServer();
+        const { data: signInRes } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: enteredPassword,
+        });
+        if (signInRes?.user || signInRes?.session) {
+          await supabase.auth.updateUser({ password: enteredPassword });
+        }
+      } catch (supaErr: any) {
+        console.warn("Supabase server updateUser notice in verify-otp:", supaErr?.message || supaErr);
       }
     }
 
@@ -149,6 +172,7 @@ export async function POST(req: Request) {
     if (!user) {
       const existingMock = findMockUserByEmail(cleanEmail);
       if (existingMock) {
+        if (enteredPassword) existingMock.password = enteredPassword;
         user = { ...existingMock, role: isAdmin ? "ADMIN" : existingMock.role };
       } else {
         user = createMockUser({
@@ -156,6 +180,7 @@ export async function POST(req: Request) {
           email: cleanEmail,
           name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
           role: isAdmin ? "ADMIN" : "USER",
+          password: enteredPassword || undefined,
           referralCode: randomCode(8),
           subIdPrefix: randomCode(6),
         });

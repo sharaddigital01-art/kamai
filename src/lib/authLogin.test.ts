@@ -196,5 +196,70 @@ describe("Web Login Authentication & Email OTP Flow", () => {
     expect(loginRes.status).toBe(200);
     expect(loginData.success).toBe(true);
     expect(loginData.user.email).toBe(signupEmail);
+
+    // Entering a wrong password should fail with 401
+    const wrongPassRes = await loginHandler(
+      new Request("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: signupEmail,
+          password: "wrongpassword999",
+        }),
+      })
+    );
+    expect(wrongPassRes.status).toBe(401);
+  });
+
+  it("persists password provided in OTP verification body and allows password login", async () => {
+    const signupEmail = "otp_password_persist@kamai.local";
+    const initialPass = "secretpass999";
+
+    const sendRes = await sendSignupOtpHandler(
+      new Request("http://localhost:3000/api/auth/send-signup-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Persist User",
+          email: signupEmail,
+          password: initialPass,
+        }),
+      })
+    );
+    const sendData = await sendRes.json();
+    expect(sendRes.status).toBe(200);
+    expect(sendData.demoOtp).toBeDefined();
+
+    // Verify OTP with password explicitly passed in body
+    const verifyRes = await verifySignupOtpHandler(
+      new Request("http://localhost:3000/api/auth/verify-signup-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: signupEmail,
+          otp: sendData.demoOtp,
+          password: initialPass,
+        }),
+      })
+    );
+    const verifyData = await verifyRes.json();
+    expect(verifyRes.status).toBe(201);
+    expect(verifyData.success).toBe(true);
+
+    // Password login must succeed
+    const loginRes = await loginHandler(
+      new Request("http://localhost:3000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: signupEmail,
+          password: initialPass,
+        }),
+      })
+    );
+    const loginData = await loginRes.json();
+    expect(loginRes.status).toBe(200);
+    expect(loginData.success).toBe(true);
+    expect(loginData.user.email).toBe(signupEmail);
   });
 });

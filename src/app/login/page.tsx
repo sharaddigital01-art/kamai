@@ -387,7 +387,7 @@ function LoginForm() {
               }`}
             >
               <Mail className="h-3.5 w-3.5" />
-              <span>Email OTP Login</span>
+              <span>Login via OTP / Magic Link</span>
             </button>
           </div>
         </div>
@@ -523,6 +523,20 @@ function LoginForm() {
                   </>
                 )}
               </button>
+
+              <div className="mt-4 pt-3 border-t border-gray-100 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("otp");
+                    setError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#169443] hover:text-[#13803a] hover:underline transition"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>Login via OTP / Magic Link →</span>
+                </button>
+              </div>
             </form>
           )}
 
@@ -571,6 +585,20 @@ function LoginForm() {
                   </>
                 )}
               </button>
+
+              <div className="mt-4 pt-3 border-t border-gray-100 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("password");
+                    setError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#169443] hover:text-[#13803a] hover:underline transition"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Have a password? Log in with Password instead →</span>
+                </button>
+              </div>
             </form>
           )}
 
@@ -671,6 +699,20 @@ function LoginForm() {
                   </>
                 )}
               </button>
+
+              <div className="mt-4 pt-3 border-t border-gray-100 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("password");
+                    setError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#169443] hover:text-[#13803a] hover:underline transition"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Have a password? Log in with Password instead →</span>
+                </button>
+              </div>
             </form>
           )}
 

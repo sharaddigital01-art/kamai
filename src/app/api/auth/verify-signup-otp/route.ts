@@ -13,12 +13,15 @@ import {
 import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
 import { verifyUnifiedOtp } from "@/lib/otp";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase/admin";
+import { createSupabaseServer } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/mockData";
 
 export const runtime = "nodejs";
 
 const VerifySchema = z.object({
   email: z.string().trim().email("Please enter a valid email address").toLowerCase(),
   otp: z.string().trim().min(1, "Please enter the verification code"),
+  password: z.string().optional(),
 });
 
 export async function POST(req: Request) {
@@ -32,7 +35,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { email, otp } = result.data;
+    const { email, otp, password: directPassword } = result.data;
     const cleanEmail = email.trim().toLowerCase();
     const cleanInputOtp = otp.trim();
 
@@ -61,6 +64,7 @@ export async function POST(req: Request) {
     }
 
     const pending = verification.data;
+    const enteredPassword = (directPassword || pending.password || "").trim();
     const isAdmin = isAdminEmail(cleanEmail);
     const role = isAdmin ? "ADMIN" : "USER";
     let authUserId: string = crypto.randomUUID();
@@ -76,8 +80,8 @@ export async function POST(req: Request) {
             name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
           },
         };
-        if (pending.password) {
-          createPayload.password = pending.password;
+        if (enteredPassword) {
+          createPayload.password = enteredPassword;
         }
 
         const { data: supaCreate, error: supaErr } =
@@ -111,14 +115,48 @@ export async function POST(req: Request) {
           if (existingSupaId) {
             authUserId = existingSupaId;
             const updatePayload: any = { email_confirm: true };
-            if (pending.password) {
-              updatePayload.password = pending.password;
+            if (enteredPassword) {
+              updatePayload.password = enteredPassword;
             }
             await adminClient.auth.admin.updateUserById(existingSupaId, updatePayload);
           }
         }
       } catch (adminErr: any) {
         console.warn("Supabase admin auto-confirm error in verify-signup-otp:", adminErr?.message || adminErr);
+      }
+    }
+
+    // Call supabase.auth.updateUser({ password: enteredPassword }) once session is confirmed
+    if (isSupabaseConfigured() && enteredPassword) {
+      try {
+        const supabase = await createSupabaseServer();
+        // 1. Establish session or sign in to confirm session
+        const { data: signInRes } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: enteredPassword,
+        });
+
+        if (signInRes?.user || signInRes?.session) {
+          // Permanently commit user's password in Supabase Auth
+          await supabase.auth.updateUser({ password: enteredPassword });
+        } else {
+          // If user was not yet registered in Supabase Auth directly, create & confirm
+          const { data: supaSignUp } = await supabase.auth.signUp({
+            email: cleanEmail,
+            password: enteredPassword,
+            options: {
+              data: {
+                name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
+              },
+            },
+          });
+          if (supaSignUp?.user) {
+            authUserId = supaSignUp.user.id;
+            await supabase.auth.updateUser({ password: enteredPassword }).catch(() => {});
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("Supabase server updateUser notice in verify-signup-otp:", supaErr?.message || supaErr);
       }
     }
 
@@ -180,6 +218,7 @@ export async function POST(req: Request) {
         name: pending.name || cleanEmail.split("@")[0] || "Kamai Karo Partner",
         role,
         isVerified: true,
+        password: enteredPassword || undefined,
         referralCode: randomCode(8),
         subIdPrefix: randomCode(6),
       });

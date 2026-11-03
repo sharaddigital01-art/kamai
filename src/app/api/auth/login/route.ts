@@ -307,6 +307,41 @@ export async function POST(req: Request) {
           }
         }
 
+        // 4. Resilience for users registered via OTP whose password wasn't yet set in Supabase Auth
+        if (authError && authError.message.toLowerCase().includes("invalid login credentials")) {
+          const adminClient = getSupabaseAdmin();
+          if (adminClient) {
+            try {
+              let existingSupaId: string | null = null;
+              const { data: listData } = await adminClient.auth.admin.listUsers();
+              const found = listData?.users?.find(
+                (u) => u.email?.toLowerCase() === targetEmail
+              );
+              if (found) existingSupaId = found.id;
+
+              if (existingSupaId) {
+                // Permanently commit password & email confirmation in Supabase Auth
+                await adminClient.auth.admin.updateUserById(existingSupaId, {
+                  password,
+                  email_confirm: true,
+                });
+
+                // Retry signInWithPassword now that password is saved
+                const retryRes = await supabase.auth.signInWithPassword({
+                  email: targetEmail,
+                  password,
+                });
+                if (retryRes.data?.user) {
+                  authData = retryRes.data;
+                  authError = null;
+                }
+              }
+            } catch (syncErr: any) {
+              console.warn("Supabase admin password sync notice in login:", syncErr?.message || syncErr);
+            }
+          }
+        }
+
         if (authError) {
           // If Supabase throws rate limit or invalid credentials, return clear message
           if (authError.status === 429) {
@@ -386,6 +421,12 @@ export async function POST(req: Request) {
           : undefined;
 
       if (existingMock) {
+        if (existingMock.password && existingMock.password !== password) {
+          return NextResponse.json(
+            { error: "Invalid credentials. Please verify your email and password." },
+            { status: 401 }
+          );
+        }
         user = {
           ...existingMock,
           role: isAdmin ? "ADMIN" : existingMock.role,
