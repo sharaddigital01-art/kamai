@@ -23,7 +23,10 @@ export async function GET(req: Request) {
     const queryTelegramId = (
       searchParams.get("telegramUserId") ||
       searchParams.get("telegramId") ||
-      searchParams.get("tgId")
+      searchParams.get("tgId") ||
+      searchParams.get("telegram_chat_id") ||
+      searchParams.get("telegramChatId") ||
+      searchParams.get("chat_id")
     )?.trim();
     const queryUserId = (
       searchParams.get("userId") ||
@@ -401,6 +404,7 @@ export async function GET(req: Request) {
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
       amazonTag: config?.amazonTag || null,
+      customAmazonTag: config?.amazonTag || null,
       trackingSubId: userTrackingSubId,
       subId: userTrackingSubId,
       isActive: isTelegramConnected ? (config?.isActive !== undefined ? config.isActive : true) : false,
@@ -415,6 +419,7 @@ export async function GET(req: Request) {
       targetChannelId: config?.targetChannelId || null,
       targetChannelName: config?.targetChannelName || null,
       amazonTag: config?.amazonTag || null,
+      customAmazonTag: config?.amazonTag || null,
       sourceChannels,
       targetChannels,
       sessionString: config?.sessionString || null,

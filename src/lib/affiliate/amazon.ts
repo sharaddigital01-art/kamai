@@ -112,13 +112,13 @@ export function formatAmazonAffiliateUrl(
   clickRefId: string,
   customTag?: string
 ): string {
-  const masterTag =
-    customTag ||
-    (typeof process !== "undefined" && process.env?.AMAZON_ASSOCIATE_TAG) ||
-    "kamaikaro-21";
-
-  // Clean URL base removing trailing ? or &
   const base = cleanedUrl.includes("?") ? cleanedUrl.split("?")[0] : cleanedUrl;
+  if (customTag && customTag.trim()) {
+    return `${base}?tag=${customTag.trim()}`;
+  }
+  const masterTag =
+    (typeof process !== "undefined" && process.env?.AMAZON_ASSOCIATE_TAG) ||
+    "kamaikaro02-21";
   return `${base}?tag=${masterTag}&ascsubtag=${clickRefId}`;
 }
 
@@ -142,12 +142,24 @@ export interface AmazonAffiliateResult {
 export async function createAmazonAffiliateLink(
   rawUrl: string,
   userId: string,
-  options: { dealId?: string; subId?: string } = {}
+  options: { dealId?: string; subId?: string; customTag?: string } = {}
 ): Promise<AmazonAffiliateResult> {
   const cleanedUrl = cleanAmazonUrl(rawUrl);
   const code = randomCode(8);
   const clickRefId = options.subId || generateClickRefId(userId, code);
-  const destinationUrl = formatAmazonAffiliateUrl(cleanedUrl, clickRefId);
+
+  let userCustomTag = options.customTag;
+  if (!userCustomTag && isDatabaseConfigured()) {
+    try {
+      const cfg = await prisma.telegramChannelConfig.findUnique({
+        where: { userId },
+        select: { amazonTag: true },
+      });
+      if (cfg?.amazonTag) userCustomTag = cfg.amazonTag;
+    } catch {}
+  }
+
+  const destinationUrl = formatAmazonAffiliateUrl(cleanedUrl, clickRefId, userCustomTag);
   const appShortUrl = shortUrlFor(code);
   const urlHash = createHash("sha256").update(cleanedUrl).digest("hex");
 
