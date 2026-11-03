@@ -519,11 +519,16 @@ export default function ReportsPage() {
           { name: "Amazon", slug: "amazon", txns: 0, profit: 0 },
         ];
 
-  // Dynamic conversion rate fallback: conv_rate = total_clicks > 0 ? ((total_orders / total_clicks) * 100).toFixed(2) + '%' : '0.0%'
+  // Dynamic conversion rate calculation:
+  // Guarded formula: clicks > 0 ? ((orders / clicks) * 100).toFixed(1) + '%' : '0%'
+  // Capped at 100% and clicks guaranteed to reflect true traffic (at least orders).
+  const effectiveClicks = Math.max(stats.totalClicks, stats.totalTransactions);
+  const convPct =
+    effectiveClicks > 0
+      ? Math.min(100, Math.max(0, (stats.totalTransactions / effectiveClicks) * 100))
+      : 0;
   const displayConvRate =
-    stats.totalClicks > 0
-      ? `${((stats.totalTransactions / stats.totalClicks) * 100).toFixed(2)}%`
-      : "0.0%";
+    effectiveClicks > 0 ? `${convPct.toFixed(1)}%` : "0%";
 
   const allTimeProfit =
     stats.allTimeProfitPaise || balances.lifetime || stats.totalProfitPaise || 0;
@@ -770,7 +775,7 @@ export default function ReportsPage() {
               Conv. Rate
             </p>
             <p className="num font-display text-xl font-black text-ink">
-              {stats.convRate || displayConvRate}
+              {displayConvRate}
             </p>
           </div>
         </div>
@@ -992,7 +997,7 @@ export default function ReportsPage() {
                     {formatINR(b.profit)}
                   </td>
                   <td className="num py-3 px-4 text-right font-semibold text-ink-soft">
-                    {b.txns > 0 ? stats.convRate || displayConvRate : "0.0%"}
+                    {b.txns > 0 ? displayConvRate : "0%"}
                   </td>
                 </tr>
               ))}
@@ -1007,7 +1012,7 @@ export default function ReportsPage() {
                   {formatINR(displayProfitPaise)}
                 </td>
                 <td className="num py-3 px-4 text-right">
-                  {stats.convRate || displayConvRate}
+                  {displayConvRate}
                 </td>
               </tr>
             </tfoot>

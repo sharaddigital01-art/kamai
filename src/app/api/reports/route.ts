@@ -16,6 +16,8 @@ import {
 import {
   fetchCuelinksTransactions,
   syncCuelinksTransactions,
+  fetchCuelinksClicks,
+  syncCuelinksClicks,
 } from "@/lib/cuelinksSync";
 
 export const runtime = "nodejs";
@@ -190,11 +192,18 @@ async function handleReports(req: Request) {
   // If sync requested or on refresh: fetch external affiliate stats strictly by active subId
   if (shouldSync && activeSubId) {
     try {
-      const transactions = await fetchCuelinksTransactions({
-        subId: activeSubId,
-      });
+      const [transactions, clicks] = await Promise.all([
+        fetchCuelinksTransactions({ subId: activeSubId }).catch(() => []),
+        fetchCuelinksClicks({ subId: activeSubId }).catch(() => []),
+      ]);
       if (transactions.length > 0) {
         await syncCuelinksTransactions(transactions, {
+          filterUserId: user.id,
+          targetSubId: activeSubId,
+        });
+      }
+      if (clicks.length > 0) {
+        await syncCuelinksClicks(clicks, {
           filterUserId: user.id,
           targetSubId: activeSubId,
         });
@@ -827,11 +836,16 @@ async function handleReports(req: Request) {
     }
   }
 
-  // Dynamic conversion rate calculation: ((orders / clicks) * 100).toFixed(2) + '%'
-  const convRate =
-    totalClicks > 0
-      ? `${((totalTxns / totalClicks) * 100).toFixed(2)}%`
-      : "0.0%";
+  // Dynamic conversion rate calculation:
+  // Guarded formula: clicks > 0 ? ((orders / clicks) * 100).toFixed(1) + '%' : '0%'
+  // Cap display at 100% and clicks guaranteed to reflect true traffic (at least orders).
+  const effectiveClicks = Math.max(totalClicks, totalTxns);
+  const convPct =
+    effectiveClicks > 0
+      ? Math.min(100, Math.max(0, (totalTxns / effectiveClicks) * 100))
+      : 0;
+  const convRate = effectiveClicks > 0 ? `${convPct.toFixed(2)}%` : "0.0%";
+  const convRate1 = effectiveClicks > 0 ? `${convPct.toFixed(1)}%` : "0%";
 
   const res = NextResponse.json({
     authenticated: true,
@@ -853,9 +867,10 @@ async function handleReports(req: Request) {
       pendingPaise: balances.pending,
       paidPaise: balances.paid,
       inWithdrawalPaise: balances.inWithdrawal,
-      totalClicks,
+      totalClicks: effectiveClicks,
       totalTransactions: totalTxns,
       convRate,
+      conversionRate: convRate1,
       registeredUsersCount: 1,
     },
     dailyStats,

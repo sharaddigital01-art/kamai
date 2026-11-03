@@ -645,7 +645,9 @@ export function getLiveStats() {
   const totalClicks = getLiveTotalClicks();
   const ledger = getLiveLedger();
   const totalTxns = ledger.filter((l) => l.status === "CONFIRMED" || l.status === "PAID").length;
-  const convRate = totalClicks > 0 ? `${((totalTxns / totalClicks) * 100).toFixed(1)}%` : "0.0%";
+  const effectiveClicks = Math.max(totalClicks, totalTxns);
+  const convPct = effectiveClicks > 0 ? Math.min(100, Math.max(0, (totalTxns / effectiveClicks) * 100)) : 0;
+  const convRate = effectiveClicks > 0 ? `${convPct.toFixed(1)}%` : "0%";
 
   return {
     totalProfitPaise: balances.lifetime,
@@ -653,7 +655,7 @@ export function getLiveStats() {
     pendingPaise: balances.pending,
     paidPaise: balances.paid,
     inWithdrawalPaise: balances.inWithdrawal,
-    totalClicks,
+    totalClicks: effectiveClicks,
     totalTransactions: totalTxns,
     convRate,
     registeredUsersCount: 1,
@@ -833,6 +835,72 @@ export function incrementMockLinkClick(
   });
 
   if (g.mockClicks.length > 50) g.mockClicks.pop();
+}
+
+export function recordMockClick(
+  userId?: string | null,
+  subId?: string | null,
+  url?: string,
+  storeName?: string
+) {
+  if (g.totalClicks === undefined) g.totalClicks = 0;
+  g.totalClicks += 1;
+
+  if (!g.mockClicks) g.mockClicks = [];
+
+  let determinedStore = storeName || "Affiliate Deal";
+  if (url) {
+    const lower = url.toLowerCase();
+    if (lower.includes("flipkart") || lower.includes("fkrt")) determinedStore = "Flipkart";
+    else if (lower.includes("amazon") || lower.includes("amzn")) determinedStore = "Amazon";
+    else if (lower.includes("myntra")) determinedStore = "Myntra";
+    else if (lower.includes("ajio")) determinedStore = "Ajio";
+    else if (lower.includes("shopsy")) determinedStore = "Shopsy";
+  }
+
+  const effectiveUserId = userId || null;
+  const effectiveSubId = subId || null;
+
+  g.mockClicks.unshift({
+    code: effectiveSubId || "direct",
+    timestamp: new Date(),
+    store: determinedStore,
+    ip: "192.168.1." + Math.floor(Math.random() * 200 + 10),
+    userId: effectiveUserId,
+    subId: effectiveSubId,
+  });
+
+  if (g.mockClicks.length > 500) g.mockClicks.pop();
+}
+
+export function ingestMockClicks(
+  userId?: string | null,
+  subId?: string | null,
+  count = 1,
+  date?: Date,
+  storeName = "Cuelinks Partner"
+) {
+  if (g.totalClicks === undefined) g.totalClicks = 0;
+  g.totalClicks += count;
+
+  if (!g.mockClicks) g.mockClicks = [];
+
+  const effectiveUserId = userId || null;
+  const effectiveSubId = subId || null;
+  const clickDate = date || new Date();
+
+  for (let i = 0; i < Math.min(count, 50); i++) {
+    g.mockClicks.unshift({
+      code: effectiveSubId || "cuelinks-sync",
+      timestamp: clickDate,
+      store: storeName,
+      ip: "192.168.1." + Math.floor(Math.random() * 200 + 10),
+      userId: effectiveUserId,
+      subId: effectiveSubId,
+    });
+  }
+
+  if (g.mockClicks.length > 500) g.mockClicks.splice(500);
 }
 
 // Real conversion simulation: increments profit from ₹0.00 upwards

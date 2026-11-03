@@ -3,8 +3,27 @@ import {
   isDatabaseConfigured,
   findMockUserById,
   upsertMockConversion,
+  recordMockClick,
+  ingestMockClicks,
   DEMO_USER,
 } from "./mockData";
+
+export interface RawCuelinksClickReport {
+  subid?: string;
+  sub_id?: string;
+  subid1?: string;
+  s1?: string;
+  clicks?: number | string;
+  click_count?: number | string;
+  total_clicks?: number | string;
+  date?: string;
+  created_at?: string;
+  merchant_name?: string;
+  store_name?: string;
+  campaign_name?: string;
+  store?: string;
+  [key: string]: any;
+}
 
 export interface RawCuelinksTransaction {
   id?: string | number;
@@ -347,6 +366,107 @@ export async function fetchCuelinksTransactions(options: {
   }
 }
 
+export async function fetchCuelinksClicks(options: {
+  startDate?: string;
+  endDate?: string;
+  apiKey?: string;
+  channelId?: string;
+  subId?: string | null;
+} = {}): Promise<RawCuelinksClickReport[]> {
+  const apiKey =
+    options.apiKey ||
+    process.env.CUELINKS_API_KEY ||
+    "8ir_BIfBqgKif2bcVsjbPeihyADLwkEoYTvwYqUB174";
+  const channelId =
+    options.channelId ||
+    process.env.CUELINKS_CHANNEL_ID ||
+    "332862";
+
+  if (!apiKey) return [];
+
+  const cleanSubId = (options.subId || "").trim();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const targetDate = options.startDate || todayStr;
+
+  // 1. Primary endpoint: https://api.cuelinks.com/v2/clicks.json
+  const urlObj = new URL("https://api.cuelinks.com/v2/clicks.json");
+  if (channelId) urlObj.searchParams.set("channel_id", channelId);
+  urlObj.searchParams.set("date", targetDate);
+  if (options.startDate) urlObj.searchParams.set("start_date", options.startDate);
+  if (options.endDate) urlObj.searchParams.set("end_date", options.endDate);
+  if (cleanSubId) urlObj.searchParams.set("subid", cleanSubId);
+
+  try {
+    const res = await fetch(urlObj.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Token token=${apiKey}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json.clicks)) return json.clicks;
+      if (Array.isArray(json.data)) return json.data;
+      if (Array.isArray(json.reports)) return json.reports;
+    }
+
+    // 2. Secondary fallback: https://www.cuelinks.com/api/v2/clicks.json
+    const fbUrl = new URL("https://www.cuelinks.com/api/v2/clicks.json");
+    if (channelId) fbUrl.searchParams.set("channel_id", channelId);
+    fbUrl.searchParams.set("date", targetDate);
+    if (options.startDate) fbUrl.searchParams.set("start_date", options.startDate);
+    if (options.endDate) fbUrl.searchParams.set("end_date", options.endDate);
+    if (cleanSubId) fbUrl.searchParams.set("subid", cleanSubId);
+
+    const fbRes = await fetch(fbUrl.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Token token=${apiKey}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+
+    if (fbRes && fbRes.ok) {
+      const json = await fbRes.json();
+      if (Array.isArray(json)) return json;
+      if (Array.isArray(json.clicks)) return json.clicks;
+      if (Array.isArray(json.data)) return json.data;
+      if (Array.isArray(json.reports)) return json.reports;
+    }
+
+    // 3. V3 Performance reports endpoint: https://developers.cuelinks.com/pub_api/v3/reports/performance
+    const v3Url = new URL("https://developers.cuelinks.com/pub_api/v3/reports/performance");
+    if (channelId) v3Url.searchParams.set("channel_id", channelId);
+    if (options.startDate) v3Url.searchParams.set("start_date", options.startDate);
+    if (options.endDate) v3Url.searchParams.set("end_date", options.endDate);
+
+    const v3Res = await fetch(v3Url.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Token ${apiKey}`,
+        Accept: "application/json",
+      },
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+
+    if (v3Res && v3Res.ok) {
+      const json = await v3Res.json();
+      const list = json?.data || json?.reports || json?.clicks || json;
+      if (Array.isArray(list)) return list;
+    }
+
+    return [];
+  } catch (err: any) {
+    console.warn("Error fetching Cuelinks clicks report:", err?.message || err);
+    return [];
+  }
+}
+
 export async function syncCuelinksTransactions(
   transactions: RawCuelinksTransaction[],
   options: {
@@ -551,6 +671,34 @@ export async function syncCuelinksTransactions(
       createdAt: safeCreatedAt,
     });
 
+    // Ensure every transaction conversion is accompanied by at least 1 click in stats
+    if (isDatabaseConfigured() && (subId || resolvedUserId)) {
+      try {
+        const existingClicks = await prisma.click.count({
+          where: {
+            OR: [
+              ...(subId ? [{ subId: { equals: subId, mode: "insensitive" as const } }] : []),
+              ...(resolvedUserId ? [{ userId: resolvedUserId }] : []),
+            ],
+          },
+        });
+        if (existingClicks === 0) {
+          await prisma.click.create({
+            data: {
+              userId: resolvedUserId || undefined,
+              subId: subId || undefined,
+              ipHash: "cuelinks-order-sync",
+              userAgent: "Cuelinks Sync Ingestion",
+              deviceType: "mobile",
+              isBot: false,
+              createdAt: safeCreatedAt,
+            },
+          });
+        }
+      } catch {}
+    }
+    recordMockClick(resolvedUserId, subId, undefined, storeName);
+
     synced++;
     if (mockSync.isNew) {
       updated++;
@@ -578,4 +726,64 @@ export async function syncCuelinksTransactions(
     },
     results,
   };
+}
+
+export async function syncCuelinksClicks(
+  clicks: RawCuelinksClickReport[],
+  options: {
+    filterUserId?: string | null;
+    targetSubId?: string | null;
+  } = {}
+): Promise<{ totalFetched: number; synced: number }> {
+  let synced = 0;
+
+  for (const item of clicks) {
+    const rawSub =
+      item.subid ||
+      item.sub_id ||
+      item.subid1 ||
+      item.s1 ||
+      options.targetSubId ||
+      "";
+    const subId = String(rawSub).trim();
+    const count = Math.max(1, Number(item.clicks || item.click_count || item.total_clicks || 1));
+    const rawDate = item.date || item.created_at || item.timestamp;
+    const clickDate = rawDate ? new Date(rawDate) : new Date();
+    const safeDate = isNaN(clickDate.getTime()) ? new Date() : clickDate;
+    const storeName =
+      item.merchant_name || item.store_name || item.campaign_name || item.store || "Cuelinks Partner";
+
+    const resolvedUserId = (await resolveUserBySubId(subId)) || options.filterUserId || null;
+
+    if (isDatabaseConfigured()) {
+      try {
+        const existing = await prisma.click.count({
+          where: {
+            subId: { equals: subId, mode: "insensitive" },
+          },
+        });
+
+        const missing = Math.max(0, count - existing);
+        if (missing > 0) {
+          const clicksToCreate = Array.from({ length: Math.min(50, missing) }).map(() => ({
+            userId: resolvedUserId || undefined,
+            subId: subId || undefined,
+            ipHash: "cuelinks-api-sync",
+            userAgent: "Cuelinks API Sync",
+            deviceType: "mobile",
+            isBot: false,
+            createdAt: safeDate,
+          }));
+          await prisma.click.createMany({ data: clicksToCreate });
+        }
+      } catch (dbErr) {
+        console.warn("Database click sync error in syncCuelinksClicks:", dbErr);
+      }
+    }
+
+    ingestMockClicks(resolvedUserId, subId, count, safeDate, storeName);
+    synced += count;
+  }
+
+  return { totalFetched: clicks.length, synced };
 }

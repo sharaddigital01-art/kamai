@@ -17,6 +17,7 @@ export const revalidate = 0;
 const ShortenSchema = z.object({
   originalUrl: z.string().trim().min(1, "originalUrl is required"),
   userId: z.string().trim().optional(),
+  subId: z.string().trim().optional(),
   slug: z.string().trim().min(3).max(32).optional(),
 });
 
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { originalUrl: rawUrl, userId: directUserId, slug: customSlug } = parseResult.data;
+    const { originalUrl: rawUrl, userId: directUserId, subId: directSubId, slug: customSlug } = parseResult.data;
     const originalUrl = normalizeTargetUrl(rawUrl);
 
     // Validate URL syntax
@@ -108,8 +109,8 @@ export async function POST(req: Request) {
       }
     }
 
-    let userSubId: string | null = null;
-    if (validUserId && isDatabaseConfigured()) {
+    let userSubId: string | null = (directSubId || "").trim() || null;
+    if (!userSubId && validUserId && isDatabaseConfigured()) {
       try {
         const u = await prisma.user.findUnique({
           where: { id: validUserId },

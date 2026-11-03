@@ -6,12 +6,16 @@ import {
   DEMO_USER,
   upsertMockConversion,
   findMockUserById,
+  recordMockClick,
 } from "@/lib/mockData";
 import {
   resolveUserBySubId,
   slugifyStore,
   normalizeStatus,
   RawCuelinksTransaction,
+  RawCuelinksClickReport,
+  fetchCuelinksClicks,
+  syncCuelinksClicks,
 } from "@/lib/cuelinksSync";
 
 export const runtime = "nodejs";
@@ -341,6 +345,34 @@ async function handleSync(req: Request) {
       userId: effectiveUserId,
     });
 
+    // Ensure every transaction conversion is accompanied by at least 1 click in stats
+    if (isDatabaseConfigured() && (subId || effectiveUserId)) {
+      try {
+        const existingClicks = await prisma.click.count({
+          where: {
+            OR: [
+              ...(subId ? [{ subId: { equals: subId, mode: "insensitive" as const } }] : []),
+              ...(effectiveUserId ? [{ userId: effectiveUserId }] : []),
+            ],
+          },
+        });
+        if (existingClicks === 0) {
+          await prisma.click.create({
+            data: {
+              userId: effectiveUserId || undefined,
+              subId: subId || undefined,
+              ipHash: "cuelinks-order-sync",
+              userAgent: "Cuelinks Sync Ingestion",
+              deviceType: "mobile",
+              isBot: false,
+              createdAt: now,
+            },
+          });
+        }
+      } catch {}
+    }
+    recordMockClick(effectiveUserId, subId, undefined, storeName);
+
     synced++;
     updated++;
     results.push({
@@ -354,6 +386,33 @@ async function handleSync(req: Request) {
     });
   }
 
+  // 3. Query and Ingest Cuelinks Clicks Report
+  let rawClicks: RawCuelinksClickReport[] = [];
+  try {
+    rawClicks = await fetchCuelinksClicks({
+      channelId,
+      apiKey,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      subId: activeSubId || undefined,
+    });
+  } catch (clickFetchErr) {
+    console.warn("Cuelinks clicks fetch error:", clickFetchErr);
+  }
+
+  let clicksSynced = 0;
+  if (rawClicks.length > 0) {
+    try {
+      const clickSyncResult = await syncCuelinksClicks(rawClicks, {
+        filterUserId: effectiveUserId,
+        targetSubId: activeSubId,
+      });
+      clicksSynced = clickSyncResult.synced;
+    } catch (clickSyncErr) {
+      console.warn("Cuelinks clicks sync error:", clickSyncErr);
+    }
+  }
+
   const response = NextResponse.json({
     success: true,
     channelId,
@@ -362,6 +421,8 @@ async function handleSync(req: Request) {
     synced,
     updated,
     skipped,
+    clicksFetched: rawClicks.length,
+    clicksSynced,
     transactions: results,
   });
 
