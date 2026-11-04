@@ -29,6 +29,7 @@ import {
   fetchWithSwr,
   CACHE_KEY_REPORTS,
 } from "@/lib/clientCache";
+import { useAuth } from "@/context/AuthContext";
 
 interface StatsData {
   totalProfitPaise: number;
@@ -123,6 +124,7 @@ function getDateBoundaries(p: Period) {
 }
 
 export default function ReportsPage() {
+  const { isAuthenticated: authIsAuthenticated, user: authUser } = useAuth();
   const [period, setPeriod] = useState<Period>("30d");
   const periodRef = useRef<Period>(period);
   periodRef.current = period;
@@ -143,6 +145,7 @@ export default function ReportsPage() {
   const cachedUser = getCachedUser();
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
+    if (authIsAuthenticated !== undefined) return authIsAuthenticated;
     if (initialCache?.authenticated !== undefined) return initialCache.authenticated;
     if (cachedUser) return cachedUser.authenticated;
     return null;
@@ -154,6 +157,14 @@ export default function ReportsPage() {
     email?: string | null;
     subId?: string | null;
   } | null>(() => {
+    if (authUser) {
+      return {
+        id: authUser.id,
+        name: authUser.name,
+        email: authUser.email,
+        subId: authUser.subIdPrefix || null,
+      };
+    }
     if (initialCache?.user) {
       return {
         id: initialCache.user.id,
@@ -172,6 +183,21 @@ export default function ReportsPage() {
     }
     return null;
   });
+
+  // Keep synced with root AuthContext
+  useEffect(() => {
+    if (authIsAuthenticated !== undefined) {
+      setIsAuthenticated(authIsAuthenticated);
+      if (authUser) {
+        setCurrentUser({
+          id: authUser.id,
+          name: authUser.name,
+          email: authUser.email,
+          subId: authUser.subIdPrefix || null,
+        });
+      }
+    }
+  }, [authIsAuthenticated, authUser]);
 
   const [balances, setBalances] = useState(() => {
     return (

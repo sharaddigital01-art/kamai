@@ -1,4 +1,5 @@
 import { HeroBannerCarousel } from "@/components/home/HeroBannerCarousel";
+import { LandingGuestHeroBanner } from "@/components/home/LandingGuestHeroBanner";
 import { CategoryPills } from "@/components/home/CategoryPills";
 import { QuickPromoTiles } from "@/components/home/QuickPromoTiles";
 import { TopSellersGrid } from "@/components/home/TopSellersGrid";
@@ -44,6 +45,9 @@ export default async function HomePage({
           That short link doesn't exist or has expired.
         </div>
       )}
+
+      {/* Guest Hero Banner (unmounts instantly upon authentication) */}
+      <LandingGuestHeroBanner />
 
       {/* 1. Hero Promotional Banner Carousel */}
       <HeroBannerCarousel />

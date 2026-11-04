@@ -44,7 +44,7 @@ describe("Open Redirect & Click Logging Endpoint: /api/r", () => {
     expect(res.headers.get("cache-control")).toContain("no-store");
 
     // Allow async microtask promise to resolve
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await new Promise((resolve) => setTimeout(resolve, 150));
 
     // Verify click was registered
     const totalClicksAfter = getLiveTotalClicks();

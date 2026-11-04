@@ -19,6 +19,7 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
+import { invalidateClientCache, setCachedUser } from "@/lib/clientCache";
 
 const ForgotPasswordModal = dynamic(
   () =>
@@ -131,9 +132,30 @@ function LoginForm() {
         return;
       }
 
-      // Success: redirect
-      router.push(nextPath.startsWith("/") ? nextPath : "/profile");
+      // Success: Invalidate client-side cache and seed authenticated user
+      invalidateClientCache();
+      if (data.user) {
+        setCachedUser({
+          authenticated: true,
+          user: data.user,
+          isAdmin: data.user.role === "ADMIN",
+        });
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kamai_auth_changed", { detail: data.user })
+        );
+      }
+
+      // Immediately flush Next.js client-side router cache
       router.refresh();
+
+      // Force Next.js hard navigation directly to /reports dashboard
+      const targetUrl =
+        nextPath && nextPath !== "/profile" && nextPath !== "/login" && nextPath.startsWith("/")
+          ? nextPath
+          : "/reports";
+      window.location.href = targetUrl;
     } catch {
       setError("Network error. Please check your connection and try again.");
     } finally {
@@ -277,9 +299,30 @@ function LoginForm() {
         return;
       }
 
-      // Success: redirect
-      router.push(nextPath.startsWith("/") ? nextPath : "/profile");
+      // Success: Invalidate client-side cache and seed authenticated user
+      invalidateClientCache();
+      if (data.user) {
+        setCachedUser({
+          authenticated: true,
+          user: data.user,
+          isAdmin: data.user.role === "ADMIN",
+        });
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kamai_auth_changed", { detail: data.user })
+        );
+      }
+
+      // Immediately flush Next.js client-side router cache
       router.refresh();
+
+      // Force Next.js hard navigation directly to /reports dashboard
+      const targetUrl =
+        nextPath && nextPath !== "/profile" && nextPath !== "/login" && nextPath.startsWith("/")
+          ? nextPath
+          : "/reports";
+      window.location.href = targetUrl;
     } catch {
       setError("Network error while verifying OTP. Please try again.");
     } finally {

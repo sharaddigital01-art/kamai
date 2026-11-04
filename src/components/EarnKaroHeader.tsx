@@ -34,6 +34,7 @@ import {
   CACHE_KEY_STATS,
   invalidateClientCache,
 } from "@/lib/clientCache";
+import { useAuth } from "@/context/AuthContext";
 
 interface HeaderProps {
   totalProfitPaise?: number;
@@ -49,16 +50,26 @@ export function EarnKaroHeader({
   const [searchQuery, setSearchQuery] = useState("");
   const pathname = usePathname();
   const router = useRouter();
+  const { user: authUser, isAdmin: authIsAdmin, logout: authLogout } = useAuth();
 
   // Instant synchronous state initialization from memory/SWR cache (<100ms / 0ms)
   const [user, setUser] = useState<{ id: string; name: string | null; email: string | null; role: string } | null>(() => {
+    if (authUser) return authUser;
     const cached = getCachedUser();
     return cached?.authenticated && cached.user ? cached.user : null;
   });
   const [isAdmin, setIsAdmin] = useState(() => {
+    if (authIsAdmin !== undefined) return authIsAdmin;
     const cached = getCachedUser();
     return Boolean(cached?.isAdmin);
   });
+
+  // Always keep user and isAdmin in sync with root AuthContext
+  useEffect(() => {
+    setUser(authUser);
+    setIsAdmin(authIsAdmin);
+  }, [authUser, authIsAdmin]);
+
   const [liveProfit, setLiveProfit] = useState(() => {
     const cachedStats = getCachedStats();
     return cachedStats?.balances?.lifetime ?? initialTotalProfit;
@@ -124,14 +135,9 @@ export function EarnKaroHeader({
 
   async function handleLogout() {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      invalidateClientCache();
-      setUser(null);
-      setIsAdmin(false);
       setLiveProfit(0);
       setDrawerOpen(false);
-      router.push("/login");
-      router.refresh();
+      await authLogout();
     } catch {
       //
     }

@@ -20,6 +20,7 @@ import {
   RotateCcw,
   Sparkles,
 } from "lucide-react";
+import { invalidateClientCache, setCachedUser } from "@/lib/clientCache";
 
 function SignupForm() {
   const router = useRouter();
@@ -274,10 +275,27 @@ function SignupForm() {
       }
 
       setSuccess(true);
+      invalidateClientCache();
+      if (data.user) {
+        setCachedUser({
+          authenticated: true,
+          user: data.user,
+          isAdmin: data.user.role === "ADMIN",
+        });
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("kamai_auth_changed", { detail: data.user })
+        );
+      }
       setTimeout(() => {
-        router.push(nextPath.startsWith("/") ? nextPath : "/profile");
         router.refresh();
-      }, 1000);
+        const targetUrl =
+          nextPath && nextPath !== "/profile" && nextPath !== "/signup" && nextPath.startsWith("/")
+            ? nextPath
+            : "/reports";
+        window.location.href = targetUrl;
+      }, 800);
     } catch {
       setError("Network error while verifying code.");
     } finally {

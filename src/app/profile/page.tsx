@@ -40,6 +40,7 @@ import {
   CACHE_KEY_STATS,
   invalidateClientCache,
 } from "@/lib/clientCache";
+import { useAuth } from "@/context/AuthContext";
 
 // Dynamic import heavy modal components to keep initial route bundle ultra-lightweight
 const WithdrawModal = dynamic(
@@ -77,6 +78,7 @@ function ProfileSkeleton() {
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { user: authUser, isAdmin: authIsAdmin, loading: authContextLoading, logout: authLogout } = useAuth();
   const [copiedId, setCopiedId] = useState(false);
   const [copiedRef, setCopiedRef] = useState(false);
 
@@ -84,11 +86,32 @@ export default function ProfilePage() {
   const cachedUser = getCachedUser();
   const cachedStats = getCachedStats();
 
-  const [authLoading, setAuthLoading] = useState(() => !cachedUser);
+  const [authLoading, setAuthLoading] = useState(() => {
+    if (authUser !== undefined) return authContextLoading;
+    return !cachedUser;
+  });
   const [user, setUser] = useState<AuthUserData | null>(() => {
+    if (authUser) return authUser as AuthUserData;
     return cachedUser?.authenticated && cachedUser.user ? (cachedUser.user as AuthUserData) : null;
   });
-  const [isAdmin, setIsAdmin] = useState(() => Boolean(cachedUser?.isAdmin));
+  const [isAdmin, setIsAdmin] = useState(() => {
+    if (authIsAdmin !== undefined) return authIsAdmin;
+    return Boolean(cachedUser?.isAdmin);
+  });
+
+  // Keep synced with root AuthContext
+  useEffect(() => {
+    if (authUser) {
+      setUser(authUser as AuthUserData);
+      setIsAdmin(authIsAdmin);
+      setAuthLoading(false);
+    } else if (!authContextLoading) {
+      setUser(null);
+      setIsAdmin(false);
+      setAuthLoading(false);
+    }
+  }, [authUser, authIsAdmin, authContextLoading]);
+
   const [loggingOut, setLoggingOut] = useState(false);
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
@@ -202,12 +225,7 @@ export default function ProfilePage() {
   async function handleLogout() {
     setLoggingOut(true);
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
-      invalidateClientCache();
-      setUser(null);
-      setIsAdmin(false);
-      router.push("/login");
-      router.refresh();
+      await authLogout();
     } catch {
       //
     } finally {
