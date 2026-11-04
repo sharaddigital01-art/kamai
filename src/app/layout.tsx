@@ -11,7 +11,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Kamai Karo: Turn Every Share into Real Cash",
-  description: "India's #1 Deal-Sharing App. Share Flipkart, Amazon, Myntra & Ajio deals and earn guaranteed cash directly to your bank account.",
+  description: "India's #1 Deal Sharing App, Share Flipkart, Amazon, Myntra & Ajio deals and earn guaranteed cash directly to your bank account.",
+  other: {
+    "mitgo-verification": "d49404c0-0d3e-47cf-a63a-2d5e658e0255",
+  },
 };
 
 export const viewport: Viewport = { themeColor: "#134024", width: "device-width", initialScale: 1 };
