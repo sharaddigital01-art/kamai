@@ -187,6 +187,12 @@ export function EarnKaroFooter() {
                     </svg>
                     YouTube
                   </a>
+                  <Link
+                    href="/contact"
+                    className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 text-emerald-300 px-3 py-1.5 font-semibold hover:bg-emerald-500/25 transition"
+                  >
+                    Support Desk
+                  </Link>
                 </div>
               </div>
             )}
@@ -249,8 +255,21 @@ export function EarnKaroFooter() {
           </div>
         </div>
 
-        {/* Footer Bottom / Copyright */}
+        {/* Footer Bottom / Copyright & Legal Links */}
         <div className="mt-8 border-t border-white/10 pt-4 text-center text-[11px] text-white/50">
+          <div className="mb-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-xs text-white/60">
+            <Link href="/privacy" prefetch={true} className="hover:text-[#22c55e] transition">
+              Privacy Policy
+            </Link>
+            <span className="text-white/20">&bull;</span>
+            <Link href="/terms" prefetch={true} className="hover:text-[#22c55e] transition">
+              Terms of Service
+            </Link>
+            <span className="text-white/20">&bull;</span>
+            <Link href="/contact" prefetch={true} className="hover:text-[#22c55e] transition">
+              Contact Us
+            </Link>
+          </div>
           <p>© 2026 Kamai Karo. All rights reserved. Made for smart earners in India.</p>
         </div>
       </div>
