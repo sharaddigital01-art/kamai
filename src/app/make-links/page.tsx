@@ -20,6 +20,7 @@ import {
   Sparkles,
   LoaderCircle,
   ArrowRight,
+  Tag,
 } from "lucide-react";
 import { detectStore } from "@/lib/linkConverter";
 import { formatINR } from "@/lib/money";
@@ -53,8 +54,20 @@ function MakeLinksContent() {
   } | null>(null);
   const [copied, setCopied] = useState(false);
   const [showTips, setShowTips] = useState(true);
+  const [featuredDeals, setFeaturedDeals] = useState<any[]>([]);
 
   const detected = useMemo(() => detectStore(inputUrl), [inputUrl]);
+
+  useEffect(() => {
+    fetch("/api/content")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.featuredDeals) {
+          setFeaturedDeals(data.featuredDeals);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchWithSwr(
@@ -332,6 +345,65 @@ function MakeLinksContent() {
           </div>
         </div>
       </div>
+
+      {/* Featured Steal Deals from Content CMS (Click to Make Link) */}
+      {featuredDeals.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="text-xs font-bold text-ink-soft uppercase tracking-wider flex items-center gap-1">
+              <span>🔥 Handpicked Steal Deals:</span>
+            </span>
+            <span className="text-[10px] text-ink-muted">Click to Make Link</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {featuredDeals.slice(0, 4).map((deal: any) => (
+              <button
+                key={deal.id}
+                type="button"
+                onClick={() => {
+                  setInputUrl(deal.affiliateUrl);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="flex items-center gap-2.5 rounded-2xl bg-white p-2.5 text-left ring-1 ring-black/5 hover:ring-[#169443] transition shadow-xs group"
+              >
+                {deal.imageUrl ? (
+                  <img
+                    src={deal.imageUrl}
+                    alt={deal.title}
+                    className="h-10 w-10 rounded-xl object-contain bg-canvas shrink-0 p-1"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=200&q=80";
+                    }}
+                  />
+                ) : (
+                  <div className="h-10 w-10 rounded-xl bg-canvas flex items-center justify-center shrink-0">
+                    <Tag className="h-4 w-4 text-[#169443]" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-xs text-ink truncate group-hover:text-[#169443] transition">
+                    {deal.title}
+                  </p>
+                  <div className="flex items-center gap-2 text-[11px] mt-0.5">
+                    <span className="font-display font-black text-[#169443]">
+                      ₹{deal.dealPrice}
+                    </span>
+                    {deal.price > deal.dealPrice && (
+                      <span className="line-through text-ink-muted text-[10px]">
+                        ₹{deal.price}
+                      </span>
+                    )}
+                    <span className="rounded bg-black/5 px-1.5 py-0.2 text-[9px] font-bold uppercase text-ink-soft">
+                      {deal.store}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 3. Video Tutorial Placeholder Card */}
       <div className="overflow-hidden rounded-3xl bg-gradient-to-tr from-[#134024] to-[#1c5d34] p-5 text-white shadow-md">

@@ -347,3 +347,36 @@ model ShortLink {
   @@index([userId, createdAt(sort: Desc)])
   @@map("short_links")
 }
+
+model AppBanner {
+  id        String    @id @default(uuid()) @db.Uuid
+  title     String
+  imageUrl  String    @map("image_url")
+  link      String
+  priority  Int       @default(0)
+  isActive  Boolean   @default(true) @map("is_active")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([isActive, priority(sort: Desc)])
+  @@map("app_banners")
+}
+
+model FeaturedDeal {
+  id           String    @id @default(uuid()) @db.Uuid
+  title        String
+  price        Float
+  dealPrice    Float     @map("deal_price")
+  imageUrl     String?   @map("image_url")
+  affiliateUrl String    @map("affiliate_url")
+  store        String
+  isActive     Boolean   @default(true) @map("is_active")
+  deletedAt    DateTime? @map("deleted_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("featured_deals")
+}
+

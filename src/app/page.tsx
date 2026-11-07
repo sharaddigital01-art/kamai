@@ -5,8 +5,10 @@ import { QuickPromoTiles } from "@/components/home/QuickPromoTiles";
 import { TopSellersGrid } from "@/components/home/TopSellersGrid";
 import { FlashDealHero } from "@/components/home/FlashDealHero";
 import { CategorySectionDeals } from "@/components/home/CategorySectionDeals";
+import { DynamicFeaturedDealsSection } from "@/components/home/DynamicFeaturedDealsSection";
 import { DealFeed } from "@/components/DealFeed";
 import { getDeals, parseDealFilters } from "@/lib/deals";
+import { getBanners, getFeaturedDeals } from "@/app/admin/content/contentStore";
 
 export default async function HomePage({
   searchParams,
@@ -16,8 +18,12 @@ export default async function HomePage({
   const sp = await searchParams;
   const filters = parseDealFilters(sp);
 
-  // Fetch deals for the view
-  const allDeals = await getDeals({ ...filters, page: 1, limit: 30 });
+  // Fetch dynamic CMS banners and featured deals alongside catalog deals
+  const [dynamicBanners, dynamicFeaturedDeals, allDeals] = await Promise.all([
+    getBanners(false).catch(() => []),
+    getFeaturedDeals(false).catch(() => []),
+    getDeals({ ...filters, page: 1, limit: 30 }),
+  ]);
   const items = allDeals.items;
 
   // Filter deals for category sections
@@ -49,14 +55,17 @@ export default async function HomePage({
       {/* Guest Hero Banner (unmounts instantly upon authentication) */}
       <LandingGuestHeroBanner />
 
-      {/* 1. Hero Promotional Banner Carousel */}
-      <HeroBannerCarousel />
+      {/* 1. Hero Promotional Banner Carousel (Dynamic CMS + Static Fallback) */}
+      <HeroBannerCarousel banners={dynamicBanners} />
 
       {/* 2. Horizontal Category Pills */}
       <CategoryPills />
 
       {/* 3. Quick Promo Tiles */}
       <QuickPromoTiles />
+
+      {/* Dynamic Handpicked Featured Deals (from CMS) */}
+      <DynamicFeaturedDealsSection deals={dynamicFeaturedDeals} />
 
       {/* If user searched or applied a filter, show direct filtered feed */}
       {hasSpecificFilter ? (

@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   ExternalLink,
   Sparkles,
+  Layers,
 } from "lucide-react";
 
 export type AdminTab =
@@ -96,6 +97,13 @@ export function AdminHeader({
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-center">
+          <Link
+            href="/admin/content"
+            className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20 transition ring-1 ring-white/20 active:scale-95"
+          >
+            <Layers className="h-3.5 w-3.5 text-emerald-300" />
+            <span>Content CMS</span>
+          </Link>
           <Link
             href="/reports"
             className="flex items-center gap-1.5 rounded-full bg-white/10 px-3.5 py-2 text-xs font-bold text-white hover:bg-white/20 transition ring-1 ring-white/20 active:scale-95"

@@ -2,7 +2,15 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
+import { ChevronLeft, ChevronRight, Sparkles, TrendingUp, ArrowRight } from "lucide-react";
+
+export interface DynamicBanner {
+  id: string;
+  title: string;
+  imageUrl: string;
+  link: string;
+  priority?: number;
+}
 
 interface Banner {
   id: number;
@@ -18,7 +26,7 @@ interface Banner {
   cta: string;
 }
 
-const BANNERS: Banner[] = [
+const STATIC_BANNERS: Banner[] = [
   {
     id: 1,
     badge: "MEGA FESTIVE BONANZA",
@@ -73,25 +81,121 @@ const BANNERS: Banner[] = [
   },
 ];
 
-export function HeroBannerCarousel() {
+interface HeroBannerCarouselProps {
+  banners?: DynamicBanner[];
+}
+
+export function HeroBannerCarousel({ banners }: HeroBannerCarouselProps) {
+  const hasDynamic = Boolean(banners && banners.length > 0);
+  const slideCount = hasDynamic ? banners!.length : STATIC_BANNERS.length;
   const [current, setCurrent] = useState(0);
 
   useEffect(() => {
+    if (slideCount <= 1) return;
     const timer = setInterval(() => {
-      setCurrent((prev) => (prev + 1) % BANNERS.length);
+      setCurrent((prev) => (prev + 1) % slideCount);
     }, 4500);
     return () => clearInterval(timer);
-  }, []);
+  }, [slideCount]);
 
-  const banner = BANNERS[current] ?? BANNERS[0]!;
+  // Render Dynamic Banners from CMS
+  if (hasDynamic && banners && banners.length > 0) {
+    const dynBanner = banners[current % banners.length]!;
+
+    return (
+      <div className="relative mt-2 overflow-hidden rounded-2xl shadow-md group">
+        <Link href={dynBanner.link} className="block relative min-h-[160px] sm:min-h-[190px] overflow-hidden">
+          {/* Background Image */}
+          <img
+            src={dynBanner.imageUrl}
+            alt={dynBanner.title}
+            className="absolute inset-0 h-full w-full object-cover transition duration-700 group-hover:scale-105"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src =
+                "https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1200&q=80";
+            }}
+          />
+          {/* Gradient Tint Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/20 p-4 sm:p-6 text-white flex flex-col justify-between">
+            {/* Top Badge */}
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-400 px-2.5 py-0.5 text-[10px] font-black uppercase text-amber-950 shadow-xs">
+                <Sparkles className="h-3 w-3" />
+                Featured Promotion
+              </span>
+              <span className="rounded-full bg-black/40 backdrop-blur-xs px-2.5 py-0.5 text-[10px] font-black text-[#22c55e] ring-1 ring-white/20">
+                MAX CASHBACK
+              </span>
+            </div>
+
+            {/* Title & CTA */}
+            <div>
+              <h2 className="font-display text-lg sm:text-2xl font-black leading-tight text-white line-clamp-2 drop-shadow-md">
+                {dynBanner.title}
+              </h2>
+              <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-1.5 text-xs font-bold text-ink shadow-sm hover:bg-white/90 active:scale-95 transition">
+                <TrendingUp className="h-3.5 w-3.5 text-[#169443]" />
+                <span>Shop Deals Now</span>
+                <ArrowRight className="h-3 w-3 text-ink-muted ml-0.5" />
+              </div>
+            </div>
+          </div>
+        </Link>
+
+        {/* Prev / Next Arrows */}
+        {slideCount > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setCurrent((prev) => (prev - 1 + slideCount) % slideCount)}
+              aria-label="Previous slide"
+              className="absolute left-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-sm"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrent((prev) => (prev + 1) % slideCount)}
+              aria-label="Next slide"
+              className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white hover:bg-black/60 transition backdrop-blur-sm"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+
+            {/* Dot Pagination */}
+            <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+              {banners.map((b, i) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setCurrent(i)}
+                  aria-label={`Go to slide ${i + 1}`}
+                  className={`h-1.5 rounded-full transition-all ${
+                    current === i ? "w-5 bg-white" : "w-1.5 bg-white/40"
+                  }`}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Fallback to Static Banners
+  const banner = STATIC_BANNERS[current % STATIC_BANNERS.length]!;
 
   return (
     <div className="relative mt-2 overflow-hidden rounded-2xl shadow-md">
       {/* Slide Container */}
-      <div className={`relative min-h-[160px] bg-gradient-to-r ${banner.bgGradient} p-4 sm:p-6 text-white transition-all duration-500 flex flex-col justify-between`}>
+      <div
+        className={`relative min-h-[160px] bg-gradient-to-r ${banner.bgGradient} p-4 sm:p-6 text-white transition-all duration-500 flex flex-col justify-between`}
+      >
         {/* Top Badges */}
         <div className="flex items-center justify-between gap-2">
-          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wider uppercase ${banner.badgeBg}`}>
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wider uppercase ${banner.badgeBg}`}
+          >
             <Sparkles className="h-3 w-3" />
             {banner.badge}
           </span>
@@ -125,10 +229,10 @@ export function HeroBannerCarousel() {
         </div>
       </div>
 
-      {/* Prev / Next Arrows (Visible on hover/desktop) */}
+      {/* Prev / Next Arrows */}
       <button
         type="button"
-        onClick={() => setCurrent((prev) => (prev - 1 + BANNERS.length) % BANNERS.length)}
+        onClick={() => setCurrent((prev) => (prev - 1 + STATIC_BANNERS.length) % STATIC_BANNERS.length)}
         aria-label="Previous slide"
         className="absolute left-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-black/30 text-white hover:bg-black/50 transition backdrop-blur-sm"
       >
@@ -136,7 +240,7 @@ export function HeroBannerCarousel() {
       </button>
       <button
         type="button"
-        onClick={() => setCurrent((prev) => (prev + 1) % BANNERS.length)}
+        onClick={() => setCurrent((prev) => (prev + 1) % STATIC_BANNERS.length)}
         aria-label="Next slide"
         className="absolute right-1.5 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-full bg-black/30 text-white hover:bg-black/50 transition backdrop-blur-sm"
       >
@@ -145,7 +249,7 @@ export function HeroBannerCarousel() {
 
       {/* Dot Pagination */}
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-        {BANNERS.map((b, i) => (
+        {STATIC_BANNERS.map((b, i) => (
           <button
             key={b.id}
             type="button"
