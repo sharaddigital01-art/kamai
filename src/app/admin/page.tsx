@@ -1,98 +1,100 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ShieldCheck,
-  Store,
+  AdminHeader,
+  AdminTab,
+} from "@/components/admin/AdminHeader";
+import {
+  UserManagementTab,
+  AdminUserData,
+} from "@/components/admin/UserManagementTab";
+import {
+  PayoutsTab,
+  AdminWithdrawalData,
+} from "@/components/admin/PayoutsTab";
+import {
+  ReconciliationTab,
+  ReconciliationData,
+} from "@/components/admin/ReconciliationTab";
+import {
+  SystemConfigTab,
+  SystemSettings,
+} from "@/components/admin/SystemConfigTab";
+import {
   Tag,
-  CreditCard,
-  Users,
-  MousePointerClick,
-  Coins,
+  Store,
   Plus,
   Trash2,
   CheckCircle2,
   XCircle,
   Clock,
-  ArrowLeft,
   Sparkles,
   ExternalLink,
-  RotateCcw,
-  AlertCircle,
-  Check,
-  Percent,
-  Power,
   Edit2,
   Save,
   LoaderCircle,
   ToggleLeft,
   ToggleRight,
-  Upload,
-  FileSpreadsheet,
-  FileUp,
-  FileText,
+  Percent,
+  Check,
   X,
+  AlertCircle,
 } from "lucide-react";
-import { formatINR, safePaise } from "@/lib/money";
-import { BrandLogo } from "@/components/BrandLogo";
 
 export default function AdminPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<
-    "overview" | "deals" | "stores" | "withdrawals" | "amazon"
-  >("overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>("users");
+  const [loading, setLoading] = useState(true);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const [data, setData] = useState<{
-    stores: any[];
-    deals: any[];
-    withdrawals: any[];
-    stats: {
-      totalRegisteredUsers: number;
-      totalConvertedLinks: number;
-      totalPlatformRevenuePaise: number;
-      totalPlatformRevenue?: number;
-      total_admin_revenue?: number;
-      pendingCutPaise?: number;
-      pendingCut?: number;
-      pending_admin_cut?: number;
-      approvedCutPaise?: number;
-      approvedCut?: number;
-      approved_admin_cut?: number;
-      rejectedCutPaise?: number;
-      rejectedCut?: number;
-      rejected_admin_cut?: number;
-      pendingPayoutsPaise: number;
-    };
-    recentClicks: any[];
-    ledger: any[];
+  // Module 1: Users State
+  const [users, setUsers] = useState<AdminUserData[]>([]);
+  const [userStats, setUserStats] = useState<{
+    totalUsers: number;
+    activeUsers: number;
+    suspendedUsers: number;
+    telegramConnected: number;
   }>({
-    stores: [],
-    deals: [],
-    withdrawals: [],
-    stats: {
-      totalRegisteredUsers: 1,
-      totalConvertedLinks: 0,
-      totalPlatformRevenuePaise: 0,
-      pendingCutPaise: 0,
-      approvedCutPaise: 0,
-      rejectedCutPaise: 0,
-      pendingPayoutsPaise: 0,
-    },
-    recentClicks: [],
-    ledger: [],
+    totalUsers: 0,
+    activeUsers: 0,
+    suspendedUsers: 0,
+    telegramConnected: 0,
   });
 
-  const [loading, setLoading] = useState(true);
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  // Module 3: Withdrawals State
+  const [withdrawals, setWithdrawals] = useState<AdminWithdrawalData[]>([]);
 
-  // Store editing state
+  // Modules 5 & 9: Reconciliation State
+  const [reconciliation, setReconciliation] = useState<ReconciliationData>({
+    clicksToday: 0,
+    totalClicks: 0,
+    lifetimeGrossPaise: 0,
+    distributedUserProfitPaise: 0,
+    platformNetProfitPaise: 0,
+    pendingCutPaise: 0,
+    approvedCutPaise: 0,
+    rejectedCutPaise: 0,
+    recentOrders: [],
+  });
+
+  // Module 11: Settings State
+  const [settings, setSettings] = useState<SystemSettings>({
+    userSplitPct: 70,
+    adminCutPct: 30,
+    minWithdrawalInr: 50,
+    amazonMasterTag: "kamaikaro02-21",
+  });
+
+  // Catalog State: Stores & Deals
+  const [stores, setStores] = useState<any[]>([]);
+  const [deals, setDeals] = useState<any[]>([]);
+
+  // Store modal & rate editing state
   const [editingStoreSlug, setEditingStoreSlug] = useState<string | null>(null);
   const [editRatePct, setEditRatePct] = useState<string>("");
-
-  // Store modal state
   const [storeModalOpen, setStoreModalOpen] = useState(false);
   const [newStore, setNewStore] = useState({
     name: "",
@@ -117,107 +119,206 @@ export default function AdminPage() {
     isActive: true,
   });
 
-  // Amazon Offline / CSV Sync state
-  const [amazonFile, setAmazonFile] = useState<File | null>(null);
-  const [amazonDragActive, setAmazonDragActive] = useState(false);
-  const [amazonUploading, setAmazonUploading] = useState(false);
-  const [amazonError, setAmazonError] = useState<string | null>(null);
-  const [amazonSummaryModalOpen, setAmazonSummaryModalOpen] = useState(false);
-  const [amazonSummary, setAmazonSummary] = useState<{
-    processedCount: number;
-    totalOrders: number;
-    totalItemPrice: number;
-    totalCommission: number;
-    totalUserProfit: number;
-    totalAdminCut: number;
-    orders?: any[];
-    message?: string;
-  } | null>(null);
-  const [csvPasteText, setCsvPasteText] = useState("");
-  const [showPasteArea, setShowPasteArea] = useState(false);
+  function notify(msg: string) {
+    setActionMsg(msg);
+    setTimeout(() => setActionMsg(null), 3500);
+  }
 
-  async function refreshAdminData() {
+  // --- Data Fetching ---
+  const fetchAllData = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/data");
-      if (res.status === 401 || res.status === 403) {
-        setAccessDenied(true);
-        router.push("/?error=access-denied");
-        return;
-      }
-      if (res.ok) {
-        const json = await res.json();
-        try {
-          const statsRes = await fetch("/api/admin/stats");
-          if (statsRes.ok) {
-            const statsJson = await statsRes.json();
-            if (statsJson.stats) {
-              json.stats = { ...json.stats, ...statsJson.stats };
-            }
+      setLoading(true);
+
+      // Fetch users
+      const usersPromise = fetch("/admin/api/users")
+        .then((res) => {
+          if (res.status === 401 || res.status === 403) {
+            router.replace("/reports");
+            return null;
           }
-        } catch {}
-        setData(json);
+          return res.ok ? res.json() : null;
+        })
+        .catch(() => null);
+
+      // Fetch withdrawals
+      const payoutsPromise = fetch("/admin/api/payouts")
+        .then((res) => {
+          if (res.status === 401 || res.status === 403) {
+            router.replace("/reports");
+            return null;
+          }
+          return res.ok ? res.json() : null;
+        })
+        .catch(() => null);
+
+      // Fetch reconciliation
+      const reconPromise = fetch("/admin/api/reconciliation")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+
+      // Fetch settings
+      const settingsPromise = fetch("/admin/api/settings")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+
+      // Fetch catalog stores & deals
+      const catalogPromise = fetch("/api/admin/data")
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+
+      const [usersRes, payoutsRes, reconRes, settingsRes, catalogRes] = await Promise.all([
+        usersPromise,
+        payoutsPromise,
+        reconPromise,
+        settingsPromise,
+        catalogPromise,
+      ]);
+
+      if (usersRes) {
+        if (usersRes.users) setUsers(usersRes.users);
+        if (usersRes.stats) setUserStats(usersRes.stats);
+      }
+
+      if (payoutsRes && payoutsRes.withdrawals) {
+        setWithdrawals(payoutsRes.withdrawals);
+      }
+
+      if (reconRes) {
+        setReconciliation({
+          clicksToday: reconRes.clicksToday || 0,
+          totalClicks: reconRes.totalClicks || 0,
+          lifetimeGrossPaise: reconRes.lifetimeGrossPaise || 0,
+          distributedUserProfitPaise: reconRes.distributedUserProfitPaise || 0,
+          platformNetProfitPaise: reconRes.platformNetProfitPaise || 0,
+          pendingCutPaise: reconRes.pendingCutPaise || 0,
+          approvedCutPaise: reconRes.approvedCutPaise || 0,
+          rejectedCutPaise: reconRes.rejectedCutPaise || 0,
+          recentOrders: reconRes.recentOrders || [],
+        });
+      }
+
+      if (settingsRes && settingsRes.settings) {
+        setSettings(settingsRes.settings);
+      }
+
+      if (catalogRes) {
+        if (catalogRes.stores) setStores(catalogRes.stores);
+        if (catalogRes.deals) setDeals(catalogRes.deals);
       }
     } catch {
       //
     } finally {
       setLoading(false);
     }
-  }
+  }, [router]);
 
   useEffect(() => {
-    refreshAdminData();
-  }, []);
+    fetchAllData();
+  }, [fetchAllData]);
 
-  function notify(msg: string) {
-    setActionMsg(msg);
-    setTimeout(() => setActionMsg(null), 3500);
-  }
-
-  // --- Amazon Offline CSV Sync Handler ---
-  async function handleAmazonUpload(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (!amazonFile && !csvPasteText.trim()) {
-      setAmazonError("Please choose a CSV file or paste CSV content.");
-      return;
-    }
-
-    setAmazonUploading(true);
-    setAmazonError(null);
-
+  // --- Module 1: User Management Actions ---
+  const handleToggleSuspendUser = async (userId: string, currentSuspended: boolean) => {
+    setActionLoading(userId);
     try {
-      let res: Response;
-      if (amazonFile) {
-        const formData = new FormData();
-        formData.append("file", amazonFile);
-        res = await fetch("/api/admin/amazon-sync", {
-          method: "POST",
-          body: formData,
-        });
-      } else {
-        res = await fetch("/api/admin/amazon-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ csvText: csvPasteText }),
-        });
-      }
+      const res = await fetch("/admin/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          action: currentSuspended ? "activate" : "suspend",
+        }),
+      });
 
       const json = await res.json();
       if (!res.ok) {
-        setAmazonError(json.error || "Failed to process Amazon CSV report.");
+        notify(json.error || "Failed to update account status");
       } else {
-        setAmazonSummary(json);
-        setAmazonSummaryModalOpen(true);
-        setAmazonFile(null);
-        setCsvPasteText("");
-        notify(`Reconciled ${json.processedCount} Amazon orders!`);
-        await refreshAdminData();
+        notify(currentSuspended ? "User account activated!" : "User account suspended.");
+        setUsers((prev) =>
+          prev.map((u) => (u.id === userId ? { ...u, isSuspended: !currentSuspended } : u))
+        );
+        setUserStats((prev) => ({
+          ...prev,
+          activeUsers: currentSuspended ? prev.activeUsers + 1 : prev.activeUsers - 1,
+          suspendedUsers: currentSuspended ? prev.suspendedUsers - 1 : prev.suspendedUsers + 1,
+        }));
       }
-    } catch (err: any) {
-      setAmazonError(err?.message || "An error occurred while uploading.");
+    } catch {
+      notify("Network error while updating user");
     } finally {
-      setAmazonUploading(false);
+      setActionLoading(null);
     }
-  }
+  };
+
+  // --- Module 3: Payout Actions ---
+  const handleMarkPayoutPaid = async (id: string, utr: string) => {
+    setActionLoading(id);
+    try {
+      const res = await fetch("/admin/api/payouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          action: "mark_paid",
+          utr,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        notify(json.error || "Failed to mark payout as paid");
+      } else {
+        notify("Payout marked as PAID with UTR recorded!");
+        setWithdrawals((prev) =>
+          prev.map((w) =>
+            w.id === id ? { ...w, status: "PAID", utr, paidAt: new Date().toISOString() } : w
+          )
+        );
+        // Refresh reconciliation metrics as ledger rows moved to PAID
+        fetch("/admin/api/reconciliation")
+          .then((r) => r.json())
+          .then((reconRes) => {
+            if (reconRes) setReconciliation((prev) => ({ ...prev, ...reconRes }));
+          })
+          .catch(() => {});
+      }
+    } catch {
+      notify("Error settling payout");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRejectPayout = async (id: string, reason: string) => {
+    setActionLoading(id);
+    try {
+      const res = await fetch("/admin/api/payouts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          action: "reject",
+          reason,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) {
+        notify(json.error || "Failed to reject payout");
+      } else {
+        notify("Withdrawal rejected. Funds returned to partner wallet!");
+        setWithdrawals((prev) =>
+          prev.map((w) =>
+            w.id === id ? { ...w, status: "FAILED", failureReason: reason } : w
+          )
+        );
+      }
+    } catch {
+      notify("Error rejecting payout");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   // --- Store Actions ---
   async function handleAddStore(e: React.FormEvent) {
@@ -226,14 +327,14 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/stores", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newStore),
       });
       if (res.ok) {
         notify(`Store "${newStore.name}" added successfully!`);
         setStoreModalOpen(false);
         setNewStore({ name: "", slug: "", commissionRateBps: 1000, category: "fashion", brandColor: "#134024" });
-        await refreshAdminData();
+        await fetchAllData();
       }
     } catch {
       notify("Failed to add store");
@@ -245,12 +346,14 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/stores", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...store, status: nextStatus }),
       });
       if (res.ok) {
         notify(`Store ${store.name} status updated to ${nextStatus}`);
-        await refreshAdminData();
+        setStores((prev) =>
+          prev.map((s) => (s.id === store.id ? { ...s, status: nextStatus } : s))
+        );
       }
     } catch {
       notify("Update failed");
@@ -263,14 +366,13 @@ export default function AdminPage() {
       notify("Please enter a valid profit percentage.");
       return;
     }
-    // bps: e.g. 10% with 60% user share = 1000 / 0.6 = ~1666 bps
     const userShareBps = store.userShareBps || 6000;
     const commissionRateBps = Math.round((pct * 1000000) / userShareBps);
 
     try {
       const res = await fetch("/api/admin/stores", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...store,
           commissionRateBps,
@@ -279,7 +381,7 @@ export default function AdminPage() {
       if (res.ok) {
         notify(`Updated ${store.name} profit rate to Upto ${pct}%!`);
         setEditingStoreSlug(null);
-        await refreshAdminData();
+        await fetchAllData();
       }
     } catch {
       notify("Failed to update rate");
@@ -293,7 +395,7 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/deals", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...newDeal,
           price: Number(newDeal.price),
@@ -316,7 +418,7 @@ export default function AdminPage() {
           isFeatured: true,
           isActive: true,
         });
-        await refreshAdminData();
+        await fetchAllData();
       }
     } catch {
       notify("Failed to publish deal");
@@ -327,12 +429,14 @@ export default function AdminPage() {
     try {
       const res = await fetch("/api/admin/deals", {
         method: "PATCH",
-        headers: { "content-type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: dealId }),
       });
       if (res.ok) {
         notify("Deal active status updated!");
-        await refreshAdminData();
+        setDeals((prev) =>
+          prev.map((d) => (d.id === dealId ? { ...d, isActive: !d.isActive } : d))
+        );
       }
     } catch {
       notify("Failed to toggle deal status");
@@ -345,871 +449,347 @@ export default function AdminPage() {
       const res = await fetch(`/api/admin/deals?id=${encodeURIComponent(id)}`, { method: "DELETE" });
       if (res.ok) {
         notify("Deal deleted successfully");
-        await refreshAdminData();
+        setDeals((prev) => prev.filter((d) => d.id !== id));
       }
     } catch {
       notify("Delete failed");
     }
   }
 
-  // --- Withdrawal Actions ---
-  async function handleWithdrawalDecision(id: string, status: "PAID" | "REJECTED") {
-    try {
-      const res = await fetch("/api/admin/withdrawals", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, status }),
-      });
-      if (res.ok) {
-        notify(`Withdrawal marked as ${status}!`);
-        await refreshAdminData();
-      }
-    } catch {
-      notify("Failed to update status");
-    }
-  }
+  const pendingWithdrawalsCount = withdrawals.filter(
+    (w) => w.status === "REQUESTED" || w.status === "PROCESSING"
+  ).length;
 
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <LoaderCircle className="h-6 w-6 animate-spin text-[#169443]" />
-      </div>
-    );
-  }
+  return (
+    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      {/* Admin Header with Navigation Tabs */}
+      <AdminHeader
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        pendingWithdrawalsCount={pendingWithdrawalsCount}
+        totalUsersCount={userStats.totalUsers || users.length}
+      />
 
-  if (accessDenied) {
-    return (
-      <div className="my-10 max-w-md mx-auto p-6 rounded-3xl bg-red-50 text-red-800 ring-1 ring-red-200 text-center">
-        <AlertCircle className="h-10 w-10 text-red-600 mx-auto mb-2" />
-        <h2 className="text-lg font-bold">Access Denied</h2>
-        <p className="text-xs text-red-700 mt-1">You must be logged in as an authorized administrator to view this portal.</p>
-        <Link href="/" className="mt-4 inline-block rounded-full bg-red-700 px-5 py-2 text-xs font-bold text-white">
-          Return to Home
-        </Link>
-      </div>
-    );
-  }
+      {/* Global Notification Toast */}
+      {actionMsg && (
+        <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 px-4 py-2.5 text-xs font-bold text-emerald-800 border border-emerald-200 animate-in fade-in shadow-xs">
+          <Check className="h-4 w-4 text-emerald-600" />
+          <span>{actionMsg}</span>
+        </div>
+      )}
 
-  // Directly bind from API response fields; paise fields are primary, rupee fields as fallback.
-  // Avoid the incorrect fallback to totalPlatformRevenuePaise for approvedCut when it's genuinely 0.
-  const approvedCutPaise = safePaise(
-    data.stats.approvedCutPaise != null
-      ? data.stats.approvedCutPaise
-      : data.stats.approvedCut != null
-      ? Math.round(Number(data.stats.approvedCut) * 100)
-      : data.stats.approved_admin_cut != null
-      ? Math.round(Number(data.stats.approved_admin_cut) * 100)
-      : 0
-  );
-
-  const pendingCutPaise = safePaise(
-    data.stats.pendingCutPaise != null
-      ? data.stats.pendingCutPaise
-      : data.stats.pendingCut != null
-      ? Math.round(Number(data.stats.pendingCut) * 100)
-      : data.stats.pending_admin_cut != null
-      ? Math.round(Number(data.stats.pending_admin_cut) * 100)
-      : 0
-  );
-
-  const rejectedCutPaise = safePaise(
-    data.stats.rejectedCutPaise != null
-      ? data.stats.rejectedCutPaise
-      : data.stats.rejectedCut != null
-      ? Math.round(Number(data.stats.rejectedCut) * 100)
-      : data.stats.rejected_admin_cut != null
-      ? Math.round(Number(data.stats.rejected_admin_cut) * 100)
-      : 0
-  );
-
-  const totalCutPaise = safePaise(
-    data.stats.totalPlatformRevenuePaise != null && data.stats.totalPlatformRevenuePaise > 0
-      ? data.stats.totalPlatformRevenuePaise
-      : approvedCutPaise + pendingCutPaise
-  );
-
-  function renderAmazonSyncSection() {
-    return (
-      <div className="overflow-hidden rounded-3xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-black/5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-black/5 pb-4">
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 ring-1 ring-amber-200">
-              <FileSpreadsheet className="h-5 w-5" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-display font-extrabold text-base text-ink">
-                  Amazon Offline / CSV Sync
-                </h3>
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                  ascsubtag Reconciler
-                </span>
-              </div>
-              <p className="text-xs text-ink-soft">
-                Upload Amazon Associates CSV report to reconcile orders and credit user earnings
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-bold">
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800 ring-1 ring-emerald-200">
-              70% User Cut
-            </span>
-            <span className="rounded-full bg-[#134024]/10 px-2.5 py-1 text-[#134024] ring-1 ring-[#134024]/20">
-              30% Platform Cut
-            </span>
+      {/* Main Content Area Based on Active Tab */}
+      {loading ? (
+        <div className="flex h-64 items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <LoaderCircle className="h-8 w-8 animate-spin text-[#169443]" />
+            <p className="text-xs text-ink-soft font-semibold">Loading admin portal...</p>
           </div>
         </div>
-
-        {amazonError && (
-          <div className="flex items-center gap-2 rounded-2xl bg-red-50 p-3 text-xs text-red-700 ring-1 ring-red-200">
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />
-            <span>{amazonError}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleAmazonUpload} className="space-y-4">
-          {/* File Dropzone */}
-          <div
-            onDragOver={(e) => {
-              e.preventDefault();
-              setAmazonDragActive(true);
-            }}
-            onDragLeave={() => setAmazonDragActive(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setAmazonDragActive(false);
-              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                setAmazonFile(e.dataTransfer.files[0]);
-                setAmazonError(null);
-              }
-            }}
-            className={`relative flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition cursor-pointer ${
-              amazonDragActive
-                ? "border-amber-500 bg-amber-50/50"
-                : amazonFile
-                ? "border-emerald-500 bg-emerald-50/30"
-                : "border-black/15 bg-canvas/40 hover:bg-canvas"
-            }`}
-            onClick={() => {
-              const fileInput = document.getElementById("amazon-csv-input");
-              if (fileInput) fileInput.click();
-            }}
-          >
-            <input
-              id="amazon-csv-input"
-              type="file"
-              accept=".csv,.txt,.tsv"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  setAmazonFile(e.target.files[0]);
-                  setAmazonError(null);
-                }
-              }}
+      ) : (
+        <>
+          {/* TAB 1: USER MANAGEMENT (MODULE 1) */}
+          {activeTab === "users" && (
+            <UserManagementTab
+              users={users}
+              stats={userStats}
+              loading={loading}
+              onRefresh={fetchAllData}
+              onToggleSuspend={handleToggleSuspendUser}
+              actionLoading={actionLoading}
             />
+          )}
 
-            {amazonFile ? (
-              <div className="flex items-center gap-3">
-                <FileSpreadsheet className="h-8 w-8 text-emerald-600" />
-                <div className="text-left">
-                  <p className="text-xs font-bold text-ink">{amazonFile.name}</p>
-                  <p className="text-[10px] text-ink-soft">
-                    {(amazonFile.size / 1024).toFixed(1)} KB • Ready to reconcile
+          {/* TAB 2: PAYOUTS & WITHDRAWAL REQUESTS (MODULE 3) */}
+          {activeTab === "withdrawals" && (
+            <PayoutsTab
+              withdrawals={withdrawals}
+              loading={loading}
+              onRefresh={fetchAllData}
+              onMarkPaid={handleMarkPayoutPaid}
+              onReject={handleRejectPayout}
+              actionLoading={actionLoading}
+            />
+          )}
+
+          {/* TAB 3: CLICKS & REVENUE RECONCILIATION (MODULES 5 & 9) */}
+          {activeTab === "reconciliation" && (
+            <ReconciliationTab
+              data={reconciliation}
+              loading={loading}
+              onRefresh={fetchAllData}
+              notify={notify}
+            />
+          )}
+
+          {/* TAB 4: SYSTEM & PLATFORM CONFIG (MODULE 11) */}
+          {activeTab === "config" && (
+            <SystemConfigTab
+              initialSettings={settings}
+              loading={loading}
+              onRefresh={fetchAllData}
+              notify={notify}
+            />
+          )}
+
+          {/* TAB 5: DEALS & BANNERS CATALOG */}
+          {activeTab === "deals" && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-black/5 shadow-xs">
+                <div>
+                  <h2 className="font-display font-black text-base text-ink">
+                    Manage Deals & Promotional Banners
+                  </h2>
+                  <p className="text-xs text-ink-soft">
+                    Publish curated affiliate deals and hero banners for shoppers across Flipkart, Amazon, and Myntra.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    setAmazonFile(null);
-                  }}
-                  className="rounded-full p-1 text-ink-soft hover:bg-black/10"
+                  onClick={() => setDealModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl bg-[#169443] hover:bg-[#134024] px-4 py-2 text-xs font-bold text-white transition shadow-xs self-start sm:self-center"
                 >
-                  <X className="h-4 w-4" />
+                  <Plus className="h-4 w-4" /> Add New Deal
                 </button>
               </div>
-            ) : (
-              <>
-                <FileUp className="h-8 w-8 text-amber-600 mb-2" />
-                <p className="text-xs font-bold text-ink">
-                  Drag & drop Amazon Associates CSV here, or{" "}
-                  <span className="text-[#169443] underline">browse file</span>
-                </p>
-                <p className="text-[10px] text-ink-soft mt-1">
-                  Expected columns: Tracking Tag / ascsubtag, Item Price, Advertising Fee (Commission), Date
-                </p>
-              </>
-            )}
-          </div>
 
-          {/* Toggle Raw Paste Option */}
-          <div className="flex items-center justify-between text-xs">
-            <button
-              type="button"
-              onClick={() => setShowPasteArea(!showPasteArea)}
-              className="text-ink-soft hover:text-ink font-semibold flex items-center gap-1"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              {showPasteArea ? "Hide raw CSV paste" : "Or paste CSV text directly"}
-            </button>
-            <span className="text-[10px] text-ink-faint">Amazon Associates Report v2.1</span>
-          </div>
-
-          {showPasteArea && (
-            <textarea
-              rows={4}
-              value={csvPasteText}
-              onChange={(e) => setCsvPasteText(e.target.value)}
-              placeholder="Paste raw CSV content here (Tracking Tag / ascsubtag, Item Price, Advertising Fee, Date)..."
-              className="w-full rounded-2xl bg-canvas p-3 text-xs font-mono outline-none ring-1 ring-black/10 focus:ring-2 focus:ring-amber-500"
-            />
+              <div className="rounded-3xl bg-white shadow-xs border border-black/5 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-canvas/60 text-[10px] font-bold uppercase tracking-wider text-ink-soft border-b border-black/5">
+                        <th className="py-3 px-4">Deal Title & Offer Tag</th>
+                        <th className="py-3 px-3">Store</th>
+                        <th className="py-3 px-3">Price / MRP</th>
+                        <th className="py-3 px-3">Status</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-black/5">
+                      {deals.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-10 text-center text-ink-muted">
+                            <Tag className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                            <p className="font-semibold text-sm text-ink">No deals active</p>
+                            <p className="text-xs text-ink-soft mt-0.5">Click "Add New Deal" to publish deals to the user home feed.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        deals.map((d) => (
+                          <tr key={d.id} className="hover:bg-canvas/40 transition">
+                            <td className="py-3 px-4 font-bold text-ink max-w-[240px]">
+                              <div className="flex items-center gap-2.5">
+                                {d.imageUrl && (
+                                  <img
+                                    src={d.imageUrl}
+                                    alt={d.title}
+                                    className="h-10 w-10 rounded-lg object-contain bg-canvas shrink-0 border border-black/5"
+                                  />
+                                )}
+                                <div>
+                                  <div className="truncate max-w-[200px]">{d.title}</div>
+                                  {d.offerTag && (
+                                    <span className="inline-block mt-0.5 rounded-md bg-amber-100 px-1.5 py-0.2 text-[10px] font-black text-amber-900 border border-amber-300">
+                                      {d.offerTag}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 font-semibold uppercase text-ink-soft">{d.storeSlug}</td>
+                            <td className="py-3 px-3 font-mono">
+                              <span className="font-bold text-ink">₹{d.price}</span>
+                              {d.mrp && <span className="line-through text-ink-muted ml-1.5 text-[11px]">₹{d.mrp}</span>}
+                            </td>
+                            <td className="py-3 px-3">
+                              <button
+                                type="button"
+                                onClick={() => toggleDealActive(d.id)}
+                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                                  d.isActive
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : "bg-neutral-100 text-neutral-500"
+                                }`}
+                              >
+                                {d.isActive ? <ToggleRight className="h-3 w-3 text-emerald-600" /> : <ToggleLeft className="h-3 w-3" />}
+                                {d.isActive ? "Active" : "Hidden"}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteDeal(d.id)}
+                                className="rounded-lg p-1 text-ink-muted hover:text-red-600 hover:bg-red-50 transition"
+                                title="Delete Deal"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={amazonUploading || (!amazonFile && !csvPasteText.trim())}
-              className="flex items-center gap-2 rounded-full bg-[#134024] px-5 py-2.5 text-xs font-bold text-white hover:bg-[#169443] transition active:scale-95 disabled:opacity-50 shadow-md"
-            >
-              {amazonUploading ? (
-                <>
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  <span>Processing Amazon CSV...</span>
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  <span>Upload & Reconcile CSV</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 pt-2 pb-16 max-w-4xl mx-auto px-3 sm:px-4">
-      {/* Top Admin Header */}
-      <div className="overflow-hidden rounded-3xl bg-gradient-to-r from-purple-950 via-indigo-950 to-[#134024] p-5 text-white shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 text-white ring-2 ring-white/30 shadow-inner">
-              <ShieldCheck className="h-6 w-6 text-emerald-400" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-display text-xl font-black text-white">Kamai Karo Admin Portal</h1>
-                <span className="rounded-full bg-emerald-500 text-ink text-[10px] font-black px-2 py-0.5 uppercase">
-                  VERIFIED ADMIN
-                </span>
-              </div>
-              <p className="text-xs text-purple-200/80">Manage Deals, Stores, Payouts & 30% Platform Cut</p>
-            </div>
-          </div>
-
-          <Link
-            href="/"
-            className="flex items-center gap-1.5 rounded-full bg-white/15 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-white/25 active:scale-95 transition"
-          >
-            <ArrowLeft className="h-4 w-4" /> Back to App
-          </Link>
-        </div>
-
-        {/* Global Notification Toast */}
-        {actionMsg && (
-          <div className="mt-4 flex items-center gap-2 rounded-2xl bg-emerald-500/20 px-3 py-2 text-xs font-bold text-emerald-300 ring-1 ring-emerald-500/40 animate-in fade-in">
-            <Check className="h-4 w-4" /> {actionMsg}
-          </div>
-        )}
-      </div>
-
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-1.5 rounded-2xl bg-white p-1.5 shadow-sm ring-1 ring-black/5 overflow-x-auto scrollbar-none">
-        <button
-          type="button"
-          onClick={() => setActiveTab("overview")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
-            activeTab === "overview"
-              ? "bg-[#134024] text-white shadow-sm"
-              : "text-ink-soft hover:bg-canvas hover:text-ink"
-          }`}
-        >
-          <Coins className="h-4 w-4" /> Platform Overview
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("deals")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
-            activeTab === "deals"
-              ? "bg-[#134024] text-white shadow-sm"
-              : "text-ink-soft hover:bg-canvas hover:text-ink"
-          }`}
-        >
-          <Tag className="h-4 w-4" /> Manage Deals & Banners ({data.deals.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("stores")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
-            activeTab === "stores"
-              ? "bg-[#134024] text-white shadow-sm"
-              : "text-ink-soft hover:bg-canvas hover:text-ink"
-          }`}
-        >
-          <Store className="h-4 w-4" /> Partner Stores & Rates ({data.stores.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("withdrawals")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
-            activeTab === "withdrawals"
-              ? "bg-[#134024] text-white shadow-sm"
-              : "text-ink-soft hover:bg-canvas hover:text-ink"
-          }`}
-        >
-          <CreditCard className="h-4 w-4" /> Withdrawal Requests (
-          {data.withdrawals.filter((w) => w.status === "REQUESTED").length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("amazon")}
-          className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition whitespace-nowrap ${
-            activeTab === "amazon"
-              ? "bg-[#134024] text-white shadow-sm"
-              : "text-ink-soft hover:bg-canvas hover:text-ink"
-          }`}
-        >
-          <FileSpreadsheet className="h-4 w-4 text-amber-500" /> Amazon CSV Sync
-        </button>
-      </div>
-
-      {/* TAB 1: PLATFORM OVERVIEW (4 KPI CARDS REQUIRED) */}
-      {activeTab === "overview" && (
-        <div className="space-y-6 animate-in fade-in">
-          {/* The 4 KPI Cards explicitly requested */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {/* KPI 1: Total Registered Users */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-purple-100 text-purple-700">
-                <Users className="h-4 w-4" />
-              </span>
-              <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
-                Total Registered Users
-              </p>
-              <p className="num font-display text-2xl font-black text-ink mt-0.5">
-                {data.stats.totalRegisteredUsers || 1}
-              </p>
-            </div>
-
-            {/* KPI 2: Total Converted Links */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-100 text-blue-700">
-                <MousePointerClick className="h-4 w-4" />
-              </span>
-              <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
-                Total Converted Links
-              </p>
-              <p className="num font-display text-2xl font-black text-ink mt-0.5">
-                {data.stats.totalConvertedLinks || 0}
-              </p>
-            </div>
-
-            {/* KPI 3: Total Platform Revenue (30% retained cut) */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-              <div className="flex items-center justify-between">
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-[#169443]">
-                  <Coins className="h-4 w-4" />
-                </span>
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-bold text-emerald-800">
-                  30% Cut
-                </span>
-              </div>
-              <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
-                Platform Revenue (30% Cut)
-              </p>
-              <p className="num font-display text-2xl font-black text-[#169443] mt-0.5">
-                {formatINR(totalCutPaise)}
-              </p>
-              <p className="text-[10px] font-medium text-emerald-700 mt-1 flex items-center gap-1">
-                <span>Realized:</span> <span className="font-bold">{formatINR(approvedCutPaise)}</span>
-              </p>
-            </div>
-
-            {/* KPI 4: Pending Payouts */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-black/5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-                <CreditCard className="h-4 w-4" />
-              </span>
-              <p className="mt-2 text-[10px] font-bold uppercase tracking-wider text-ink-faint">
-                Pending Payouts
-              </p>
-              <p className="num font-display text-2xl font-black text-amber-600 mt-0.5">
-                {formatINR(data.stats.pendingPayoutsPaise || 0)}
-              </p>
-            </div>
-          </div>
-
-          {/* Detailed Revenue Status Breakdown Card (Highlighted Green, matching User Dashboard Design) */}
-          <div className="overflow-hidden rounded-3xl bg-gradient-to-tr from-[#134024] via-[#1a5530] to-[#169443] p-5 sm:p-6 text-white shadow-md">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/15 pb-4">
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 text-white ring-2 ring-white/30 shadow-inner">
-                  <Coins className="h-5 w-5 text-emerald-300" />
-                </span>
+          {/* TAB 6: PARTNER STORES & RATES */}
+          {activeTab === "stores" && (
+            <div className="space-y-4 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-5 rounded-3xl border border-black/5 shadow-xs">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-display text-base font-extrabold text-white">
-                      Platform Revenue Breakdown
-                    </h2>
-                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-200">
-                      30% Retained Cut
-                    </span>
-                  </div>
-                  <p className="text-xs text-white/80">
-                    Live platform revenue segmented across affiliate order statuses
+                  <h2 className="font-display font-black text-base text-ink">
+                    Partner Stores & Commission Rates
+                  </h2>
+                  <p className="text-xs text-ink-soft">
+                    Manage supported merchant brands, profit rates displayed to users, and status toggles.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setStoreModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl bg-[#169443] hover:bg-[#134024] px-4 py-2 text-xs font-bold text-white transition shadow-xs self-start sm:self-center"
+                >
+                  <Plus className="h-4 w-4" /> Add Partner Brand
+                </button>
               </div>
 
-              <div className="text-left sm:text-right">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
-                  Total Platform Cut (30%)
-                </p>
-                <p className="num font-display text-2xl sm:text-3xl font-black text-white">
-                  {formatINR(totalCutPaise)}
-                </p>
-              </div>
-            </div>
-
-            {/* Status Sub-Cards / Pills */}
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {/* ⏳ Pending Cut (In Return Window) */}
-              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                    <Clock className="h-3.5 w-3.5" /> ⏳ Pending Cut
-                  </span>
-                  <span className="rounded-full bg-amber-400/25 px-2 py-0.5 text-[9px] font-bold text-amber-200">
-                    In Return Window
-                  </span>
-                </div>
-                <p className="num font-display text-2xl font-black text-amber-300 mt-2">
-                  {formatINR(pendingCutPaise)}
-                </p>
-                <p className="text-[10px] text-white/70 mt-1">
-                  Commissions currently in 30-90 day return & merchant verification window.
-                </p>
-              </div>
-
-              {/* ✅ Approved / Realized Cut */}
-              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> ✅ Approved Cut
-                  </span>
-                  <span className="rounded-full bg-emerald-400/25 px-2 py-0.5 text-[9px] font-bold text-emerald-200">
-                    Realized
-                  </span>
-                </div>
-                <p className="num font-display text-2xl font-black text-white mt-2">
-                  {formatINR(approvedCutPaise)}
-                </p>
-                <p className="text-[10px] text-white/70 mt-1">
-                  Cleared earnings ready & deposited into platform accounts.
-                </p>
-              </div>
-
-              {/* ❌ Rejected / Cancelled Cut */}
-              <div className="rounded-2xl bg-black/20 p-4 ring-1 ring-white/10 backdrop-blur-sm">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-xs font-bold text-rose-300">
-                    <XCircle className="h-3.5 w-3.5" /> ❌ Rejected Cut
-                  </span>
-                  <span className="rounded-full bg-rose-400/25 px-2 py-0.5 text-[9px] font-bold text-rose-200">
-                    Cancelled
-                  </span>
-                </div>
-                <p className="num font-display text-2xl font-black text-rose-300 mt-2">
-                  {formatINR(rejectedCutPaise)}
-                </p>
-                <p className="text-[10px] text-white/70 mt-1">
-                  Cancelled or returned customer orders excluded from payout.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Recent Live Clicks Log */}
-          <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-            <div className="p-4 border-b border-black/5 flex items-center justify-between">
-              <h3 className="font-display font-extrabold text-sm text-ink flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-ink-faint" /> Recent Tracked Activity & Clicks
-              </h3>
-              <span className="text-[11px] text-ink-faint">{data.recentClicks.length} events logged</span>
-            </div>
-
-            {data.recentClicks.length === 0 ? (
-              <div className="p-6 text-center text-xs text-ink-faint">
-                No clicks tracked yet. Share a deal link or click any product to see live tracking here!
-              </div>
-            ) : (
-              <div className="divide-y divide-black/5 text-xs">
-                {data.recentClicks.map((c, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-3 hover:bg-canvas/50">
-                    <div>
-                      <p className="font-bold text-ink">
-                        Link Code: <span className="font-mono text-[#169443]">{c.code}</span> ({c.store})
-                      </p>
-                      <p className="text-[10px] text-ink-faint">Security Salted IP Hash: {c.ip}</p>
-                    </div>
-                    <span className="text-[10px] font-semibold text-ink-soft">
-                      {new Date(c.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Amazon Offline / CSV Sync Section */}
-          {renderAmazonSyncSection()}
-        </div>
-      )}
-
-      {/* TAB 2: MANAGE DEALS & BANNERS */}
-      {activeTab === "deals" && (
-        <div className="space-y-4 animate-in fade-in">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-display font-extrabold text-base text-ink">Manage Deals & Promotional Banners</h2>
-              <p className="text-xs text-ink-soft">Add flash deals, festival banners, and edit active state</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setDealModalOpen(true)}
-              className="flex items-center gap-1.5 rounded-full bg-[#134024] px-4 py-2 text-xs font-bold text-white hover:bg-[#169443] transition active:scale-95 shadow-sm"
-            >
-              <Plus className="h-4 w-4" /> Add New Deal
-            </button>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-canvas/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5">
-                    <th className="py-3 px-4">Deal Title & Offer Tag</th>
-                    <th className="py-3 px-3">Store</th>
-                    <th className="py-3 px-3">Price / MRP</th>
-                    <th className="py-3 px-3">Profit</th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5">
-                  {data.deals.map((d) => (
-                    <tr key={d.id} className="hover:bg-canvas/50">
-                      <td className="py-3 px-4 font-bold text-ink max-w-[240px]">
-                        <div className="flex items-center gap-2.5">
-                          {d.imageUrl ? (
-                            <img src={d.imageUrl} alt="" className="h-9 w-9 rounded-xl object-contain bg-canvas shrink-0 p-0.5" />
-                          ) : (
-                            <div className="h-9 w-9 rounded-xl bg-canvas grid place-items-center shrink-0">🛍️</div>
-                          )}
-                          <div className="truncate">
-                            <span className="truncate block font-bold text-ink">{d.title}</span>
-                            {d.offerTag ? (
-                              <span className="inline-block rounded-md bg-amber-100 text-amber-800 text-[9px] font-extrabold px-1.5 py-0.2 mt-0.5">
-                                {d.offerTag}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-ink-soft">
-                        <div className="flex items-center gap-1.5">
-                          <BrandLogo slug={d.store?.slug} name={d.store?.name} size={16} className="h-4 w-4 rounded" />
-                          <span>{d.store?.name}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="num font-black text-ink">{formatINR(d.pricePaise)}</span>
-                        <span className="num text-ink-faint line-through ml-1.5 text-[11px]">{formatINR(d.mrpPaise)}</span>
-                      </td>
-                      <td className="num py-3 px-3 font-bold text-[#169443]">
-                        {formatINR(d.estimatedProfitPaise)}
-                      </td>
-                      <td className="py-3 px-3">
-                        <button
-                          type="button"
-                          onClick={() => toggleDealActive(d.id)}
-                          className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-black transition ${
-                            d.isActive !== false
-                              ? "bg-emerald-100 text-[#169443] hover:bg-emerald-200"
-                              : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-                          }`}
-                        >
-                          {d.isActive !== false ? "ACTIVE" : "PAUSED"}
-                        </button>
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDeal(d.id)}
-                          className="rounded-lg p-1.5 text-red-600 hover:bg-red-50 transition"
-                          aria-label="Delete deal"
-                          title="Delete deal"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: PARTNER STORES & COMMISSION RATES */}
-      {activeTab === "stores" && (
-        <div className="space-y-4 animate-in fade-in">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-display font-extrabold text-base text-ink">Partner Stores & Profit Rates</h2>
-              <p className="text-xs text-ink-soft">Update displayed profit percentages (e.g. Upto 8.5% Profit) and toggle active/paused</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setStoreModalOpen(true)}
-              className="flex items-center gap-1.5 rounded-full bg-[#134024] px-4 py-2 text-xs font-bold text-white hover:bg-[#169443] transition active:scale-95 shadow-sm"
-            >
-              <Plus className="h-4 w-4" /> Add Partner Brand
-            </button>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-canvas/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5">
-                    <th className="py-3 px-4">Brand</th>
-                    <th className="py-3 px-3">Displayed Profit Rate</th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-4 text-right">Quick Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-black/5">
-                  {data.stores.map((s) => {
-                    const currentProfitPct = ((s.commissionRateBps * (s.userShareBps || 6000)) / 1000000).toFixed(1);
-                    const isEditing = editingStoreSlug === s.slug;
-
-                    return (
-                      <tr key={s.slug} className="hover:bg-canvas/50">
-                        <td className="py-3 px-4 font-bold text-ink">
-                          <div className="flex items-center gap-2.5">
-                            <BrandLogo slug={s.slug} name={s.name} size={28} className="h-7 w-7 rounded-xl" />
-                            <div>
-                              <span>{s.name}</span>
-                              <span className="block text-[10px] text-ink-faint font-normal font-mono">{s.slug}</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-3">
-                          {isEditing ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-ink text-xs">Upto</span>
-                              <input
-                                type="number"
-                                step="0.1"
-                                autoFocus
-                                value={editRatePct}
-                                onChange={(e) => setEditRatePct(e.target.value)}
-                                className="w-16 rounded-lg bg-canvas px-2 py-1 text-xs font-bold text-[#169443] ring-1 ring-black/20 outline-none"
-                              />
-                              <span className="font-bold text-ink text-xs">%</span>
-                              <button
-                                type="button"
-                                onClick={() => handleSaveStoreRate(s)}
-                                className="rounded-md bg-[#169443] p-1 text-white hover:bg-emerald-700"
-                                title="Save Rate"
-                              >
-                                <Save className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-[#169443]">
-                                Upto {currentProfitPct}% Profit
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingStoreSlug(s.slug);
-                                  setEditRatePct(currentProfitPct);
-                                }}
-                                className="rounded p-1 text-ink-soft hover:bg-canvas hover:text-ink"
-                                title="Edit rate"
-                              >
-                                <Edit2 className="h-3 w-3" />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 px-3">
-                          <button
-                            type="button"
-                            onClick={() => toggleStoreStatus(s)}
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase transition ${
-                              s.status === "ACTIVE"
-                                ? "bg-emerald-100 text-[#169443] hover:bg-emerald-200"
-                                : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-                            }`}
-                          >
-                            {s.status}
-                          </button>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => toggleStoreStatus(s)}
-                            className="rounded-lg bg-canvas px-3 py-1.5 text-[11px] font-bold text-ink hover:bg-black/10 transition"
-                          >
-                            {s.status === "ACTIVE" ? "Pause Store" : "Activate Store"}
-                          </button>
-                        </td>
+              <div className="rounded-3xl bg-white shadow-xs border border-black/5 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-canvas/60 text-[10px] font-bold uppercase tracking-wider text-ink-soft border-b border-black/5">
+                        <th className="py-3 px-4">Brand</th>
+                        <th className="py-3 px-3">Displayed Profit Rate</th>
+                        <th className="py-3 px-3">Status</th>
+                        <th className="py-3 px-4 text-right">Quick Actions</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+                    </thead>
+                    <tbody className="divide-y divide-black/5">
+                      {stores.map((s) => {
+                        const isEditing = editingStoreSlug === s.slug;
+                        const userShareBps = s.userShareBps || 6000;
+                        const effectiveRatePct = ((s.commissionRateBps * userShareBps) / 1000000).toFixed(1);
 
-      {/* TAB 4: WITHDRAWAL REQUESTS MANAGEMENT */}
-      {activeTab === "withdrawals" && (
-        <div className="space-y-4 animate-in fade-in">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-display font-extrabold text-base text-ink">User Withdrawal Requests</h2>
-              <p className="text-xs text-ink-soft">Review pending UPI payouts, mark as approved/paid, or reject to restore user balance</p>
-            </div>
-          </div>
+                        return (
+                          <tr key={s.id || s.slug} className="hover:bg-canvas/40 transition">
+                            <td className="py-3 px-4 font-bold text-ink">
+                              <div className="flex items-center gap-2">
+                                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.brandColor || "#134024" }} />
+                                <span>{s.name}</span>
+                                <span className="font-mono text-[10px] text-ink-muted">({s.slug})</span>
+                              </div>
+                            </td>
 
-          <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5">
-            {data.withdrawals.length === 0 ? (
-              <div className="p-8 text-center text-xs text-ink-faint">
-                No user withdrawal requests found. Requests submitted by users will appear here.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="bg-canvas/60 text-[10px] font-extrabold uppercase tracking-wider text-ink-faint border-b border-black/5">
-                      <th className="py-3 px-4">User Details</th>
-                      <th className="py-3 px-3">Requested Amount</th>
-                      <th className="py-3 px-3">UPI ID / Bank</th>
-                      <th className="py-3 px-3">Request Date</th>
-                      <th className="py-3 px-3">Status</th>
-                      <th className="py-3 px-4 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-black/5">
-                    {data.withdrawals.map((w) => (
-                      <tr key={w.id} className="hover:bg-canvas/50">
-                        <td className="py-3 px-4 font-bold text-ink">
-                          <div>
-                            <span className="block font-bold">{w.userName || "Kamai Karo User"}</span>
-                            <span className="block text-[10px] text-ink-soft font-normal">{w.userEmail || "user@kamaikaro.in"}</span>
-                          </div>
-                        </td>
-                        <td className="num py-3 px-3 font-black text-ink text-sm">
-                          {formatINR(w.amountPaise)}
-                        </td>
-                        <td className="py-3 px-3 font-mono text-ink-soft">{w.upiId || "user@upi"}</td>
-                        <td className="py-3 px-3 text-ink-faint text-[11px]">
-                          {new Date(w.requestedAt).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase ${
-                              w.status === "PAID"
-                                ? "bg-emerald-100 text-[#169443]"
-                                : w.status === "REJECTED" || w.status === "FAILED"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-amber-100 text-amber-800"
-                            }`}
-                          >
-                            {w.status === "FAILED" ? "REJECTED" : w.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          {w.status === "REQUESTED" || w.status === "PROCESSING" ? (
-                            <div className="flex items-center justify-end gap-1.5">
+                            <td className="py-3 px-3">
+                              {isEditing ? (
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    step="0.1"
+                                    value={editRatePct}
+                                    onChange={(e) => setEditRatePct(e.target.value)}
+                                    placeholder={effectiveRatePct}
+                                    className="w-16 rounded-lg bg-canvas px-2 py-1 text-xs font-bold text-ink border border-black/10 focus:outline-none"
+                                    autoFocus
+                                  />
+                                  <span className="text-xs font-bold text-ink-soft">%</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveStoreRate(s)}
+                                    className="rounded-lg bg-[#169443] p-1 text-white hover:bg-[#134024]"
+                                    title="Save Rate"
+                                  >
+                                    <Save className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingStoreSlug(null)}
+                                    className="rounded-lg bg-canvas p-1 text-ink-soft hover:text-ink"
+                                    title="Cancel"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-[#169443]">Upto {effectiveRatePct}% Profit</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingStoreSlug(s.slug);
+                                      setEditRatePct(effectiveRatePct);
+                                    }}
+                                    className="text-ink-muted hover:text-ink transition"
+                                    title="Edit Rate"
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-3">
                               <button
                                 type="button"
-                                onClick={() => handleWithdrawalDecision(w.id, "PAID")}
-                                className="flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 transition active:scale-95 shadow-sm"
+                                onClick={() => toggleStoreStatus(s)}
+                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                                  s.status === "ACTIVE"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                                }`}
                               >
-                                <CheckCircle2 className="h-3.5 w-3.5" /> Mark as Paid
+                                {s.status === "ACTIVE" ? "Active" : "Paused"}
                               </button>
+                            </td>
+
+                            <td className="py-3 px-4 text-right">
                               <button
                                 type="button"
-                                onClick={() => handleWithdrawalDecision(w.id, "REJECTED")}
-                                className="flex items-center gap-1 rounded-full bg-red-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-red-700 transition active:scale-95 shadow-sm"
+                                onClick={() => toggleStoreStatus(s)}
+                                className="text-xs font-semibold text-ink-soft hover:text-ink underline"
                               >
-                                <XCircle className="h-3.5 w-3.5" /> Reject
+                                {s.status === "ACTIVE" ? "Pause Store" : "Activate"}
                               </button>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] font-semibold text-ink-faint">
-                              {w.status === "PAID" ? "Completed" : "Closed"}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* TAB 5: AMAZON OFFLINE / CSV SYNC */}
-      {activeTab === "amazon" && (
-        <div className="space-y-6 animate-in fade-in">
-          {renderAmazonSyncSection()}
-        </div>
-      )}
-
-      {/* MODAL: ADD DEAL WITH OFFER TAG & DESTINATION URL */}
+      {/* MODAL: ADD DEAL */}
       {dealModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-            <h3 className="font-display font-extrabold text-base text-ink mb-1">Publish New Deal / Banner</h3>
-            <p className="text-xs text-ink-soft mb-4">Adds deal directly to Home, Flash Deals and Category Sections.</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-black/5">
+              <h3 className="font-display font-black text-base text-ink">Publish New Deal / Banner</h3>
+              <button
+                type="button"
+                onClick={() => setDealModalOpen(false)}
+                className="rounded-full p-1 text-ink-muted hover:bg-canvas hover:text-ink"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
 
-            <form onSubmit={handleAddDeal} className="space-y-3.5 text-xs">
+            <form onSubmit={handleAddDeal} className="space-y-3.5 text-xs pt-4">
               <div>
-                <label className="font-bold text-ink">Deal Title</label>
+                <label className="font-bold text-ink">Deal Title *</label>
                 <input
                   required
-                  placeholder="e.g. NASHER MILES Luggage Set of 3"
+                  placeholder="e.g. Boat Airdopes 141 ANC"
                   value={newDeal.title}
                   onChange={(e) => setNewDeal({ ...newDeal, title: e.target.value })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#169443]/30"
                 />
               </div>
 
@@ -1219,112 +799,100 @@ export default function AdminPage() {
                   <select
                     value={newDeal.storeSlug}
                     onChange={(e) => setNewDeal({ ...newDeal, storeSlug: e.target.value })}
-                    className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
                   >
-                    {data.stores.map((s) => (
+                    {stores.map((s) => (
                       <option key={s.slug} value={s.slug}>
                         {s.name}
                       </option>
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label className="font-bold text-ink">Offer Tag / Banner Badge</label>
-                  <input
-                    placeholder="e.g. Mega Festive Bonanza"
-                    value={newDeal.offerTag}
-                    onChange={(e) => setNewDeal({ ...newDeal, offerTag: e.target.value })}
-                    className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="font-bold text-ink">Deal Price (₹)</label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="4999"
-                    value={newDeal.price}
-                    onChange={(e) => setNewDeal({ ...newDeal, price: e.target.value })}
-                    className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-ink">Original MRP (₹)</label>
-                  <input
-                    type="number"
-                    required
-                    placeholder="47985"
-                    value={newDeal.mrp}
-                    onChange={(e) => setNewDeal({ ...newDeal, mrp: e.target.value })}
-                    className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-ink">Destination URL (Canonical Product Page)</label>
-                <input
-                  required
-                  placeholder="https://www.flipkart.com/..."
-                  value={newDeal.destinationUrl}
-                  onChange={(e) => setNewDeal({ ...newDeal, destinationUrl: e.target.value })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1 font-mono text-[11px]"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-ink">Deal Image URL</label>
-                <input
-                  placeholder="https://images.unsplash.com/..."
-                  value={newDeal.imageUrl}
-                  onChange={(e) => setNewDeal({ ...newDeal, imageUrl: e.target.value })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1 font-mono text-[11px]"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="font-bold text-ink">Category</label>
                   <select
                     value={newDeal.category}
                     onChange={(e) => setNewDeal({ ...newDeal, category: e.target.value })}
-                    className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
                   >
                     <option value="electronics">Electronics</option>
                     <option value="fashion">Fashion</option>
-                    <option value="footwear">Footwear</option>
-                    <option value="home">Home & Kitchen</option>
-                    <option value="accessories">Accessories</option>
                     <option value="beauty">Beauty</option>
+                    <option value="home">Home & Kitchen</option>
                   </select>
-                </div>
-                <div className="flex items-center gap-3 pt-6">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold text-ink">
-                    <input
-                      type="checkbox"
-                      checked={newDeal.isFeatured}
-                      onChange={(e) => setNewDeal({ ...newDeal, isFeatured: e.target.checked })}
-                      className="rounded accent-[#169443]"
-                    />
-                    <span>Featured Deal</span>
-                  </label>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-4">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-bold text-ink">Discounted Price (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="999"
+                    value={newDeal.price}
+                    onChange={(e) => setNewDeal({ ...newDeal, price: e.target.value })}
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-ink">Original MRP (₹) *</label>
+                  <input
+                    type="number"
+                    required
+                    placeholder="2990"
+                    value={newDeal.mrp}
+                    onChange={(e) => setNewDeal({ ...newDeal, mrp: e.target.value })}
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Offer Tag / Badge</label>
+                <input
+                  placeholder="e.g. 70% OFF · Hot Deal"
+                  value={newDeal.offerTag}
+                  onChange={(e) => setNewDeal({ ...newDeal, offerTag: e.target.value })}
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Image URL</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={newDeal.imageUrl}
+                  onChange={(e) => setNewDeal({ ...newDeal, imageUrl: e.target.value })}
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Destination URL</label>
+                <input
+                  type="url"
+                  placeholder="https://www.flipkart.com/..."
+                  value={newDeal.destinationUrl}
+                  onChange={(e) => setNewDeal({ ...newDeal, destinationUrl: e.target.value })}
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-black/5">
                 <button
                   type="button"
                   onClick={() => setDealModalOpen(false)}
-                  className="flex-1 rounded-full bg-canvas py-2.5 font-bold text-ink hover:bg-black/10 transition"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-soft hover:bg-canvas"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-full bg-[#134024] py-2.5 font-bold text-white hover:bg-[#169443] transition shadow-md"
+                  className="px-5 py-2 rounded-xl bg-[#169443] hover:bg-[#134024] text-white text-xs font-bold transition shadow-xs"
                 >
                   Publish Deal
                 </button>
@@ -1336,192 +904,87 @@ export default function AdminPage() {
 
       {/* MODAL: ADD STORE */}
       {storeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-2xl animate-in zoom-in-95">
-            <h3 className="font-display font-extrabold text-base text-ink mb-1">Add Partner Brand</h3>
-            <p className="text-xs text-ink-soft mb-4">Register a new store into the Kamai Karo platform.</p>
-
-            <form onSubmit={handleAddStore} className="space-y-3 text-xs">
-              <div>
-                <label className="font-bold text-ink">Brand Name</label>
-                <input
-                  required
-                  placeholder="e.g. Nykaa, Zomato"
-                  value={newStore.name}
-                  onChange={(e) =>
-                    setNewStore({
-                      ...newStore,
-                      name: e.target.value,
-                      slug: e.target.value.toLowerCase().replace(/\s+/g, ""),
-                    })
-                  }
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-ink">Store Slug</label>
-                <input
-                  required
-                  placeholder="e.g. nykaa"
-                  value={newStore.slug}
-                  onChange={(e) => setNewStore({ ...newStore, slug: e.target.value })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-ink">Commission Rate (bps, 1000 = 10%)</label>
-                <input
-                  type="number"
-                  required
-                  value={newStore.commissionRateBps}
-                  onChange={(e) => setNewStore({ ...newStore, commissionRateBps: Number(e.target.value) })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-ink">Category</label>
-                <select
-                  value={newStore.category}
-                  onChange={(e) => setNewStore({ ...newStore, category: e.target.value })}
-                  className="w-full rounded-xl bg-canvas p-2.5 outline-none ring-1 ring-black/10 mt-1"
-                >
-                  <option value="fashion">Fashion</option>
-                  <option value="electronics">Electronics</option>
-                  <option value="beauty">Beauty</option>
-                  <option value="grocery">Grocery</option>
-                  <option value="travel">Travel</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setStoreModalOpen(false)}
-                  className="flex-1 rounded-full bg-canvas py-2.5 font-bold text-ink hover:bg-black/10"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-full bg-[#134024] py-2.5 font-bold text-white hover:bg-[#169443]"
-                >
-                  Save Store
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: AMAZON CSV RECONCILE SUMMARY */}
-      {amazonSummaryModalOpen && amazonSummary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-lg rounded-3xl bg-white p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-black/5 pb-3">
-              <div className="flex items-center gap-2.5">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-100 text-[#169443]">
-                  <CheckCircle2 className="h-6 w-6" />
-                </span>
-                <div>
-                  <h3 className="font-display font-extrabold text-base text-ink">
-                    Amazon CSV Report Reconciled
-                  </h3>
-                  <p className="text-[11px] text-[#169443] font-bold">
-                    Processed {amazonSummary.processedCount} orders, Total User Profit: ₹{amazonSummary.totalUserProfit.toFixed(2)}, Admin Cut: ₹{amazonSummary.totalAdminCut.toFixed(2)}
-                  </p>
-                </div>
-              </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-black/5">
+              <h3 className="font-display font-black text-base text-ink">Add Partner Brand</h3>
               <button
                 type="button"
-                onClick={() => setAmazonSummaryModalOpen(false)}
-                className="rounded-full p-1.5 text-ink-soft hover:bg-canvas"
+                onClick={() => setStoreModalOpen(false)}
+                className="rounded-full p-1 text-ink-muted hover:bg-canvas hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="my-4 space-y-4">
-              {/* Highlight Banner */}
-              <div className="rounded-2xl bg-gradient-to-tr from-[#134024] via-[#1a5530] to-[#169443] p-4 text-white shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">
-                  Reconciliation Complete
-                </p>
-                <p className="font-display text-lg font-black text-white mt-0.5">
-                  Processed {amazonSummary.processedCount} orders, Total User Profit: ₹{amazonSummary.totalUserProfit.toFixed(2)}, Admin Cut: ₹{amazonSummary.totalAdminCut.toFixed(2)}
-                </p>
-                <p className="text-xs text-white/80 mt-1">
-                  ascsubtags matched to user link clicks. Balances and platform cuts dynamically credited.
-                </p>
+            <form onSubmit={handleAddStore} className="space-y-3.5 text-xs pt-4">
+              <div>
+                <label className="font-bold text-ink">Brand Name *</label>
+                <input
+                  required
+                  placeholder="e.g. Myntra"
+                  value={newStore.name}
+                  onChange={(e) =>
+                    setNewStore({
+                      ...newStore,
+                      name: e.target.value,
+                      slug: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""),
+                    })
+                  }
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
               </div>
 
-              {/* 3 Metric Cards */}
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="rounded-2xl bg-canvas p-3 ring-1 ring-black/5">
-                  <p className="text-[10px] font-bold uppercase text-ink-faint">Orders</p>
-                  <p className="num font-display text-xl font-black text-ink mt-0.5">
-                    {amazonSummary.processedCount}
-                  </p>
+              <div>
+                <label className="font-bold text-ink">Slug *</label>
+                <input
+                  required
+                  placeholder="e.g. myntra"
+                  value={newStore.slug}
+                  onChange={(e) => setNewStore({ ...newStore, slug: e.target.value })}
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 font-mono focus:bg-white"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-bold text-ink">Commission Rate (BPS)</label>
+                  <input
+                    type="number"
+                    value={newStore.commissionRateBps}
+                    onChange={(e) => setNewStore({ ...newStore, commissionRateBps: Number(e.target.value) })}
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  />
+                  <span className="text-[10px] text-ink-muted">1000 bps = 10% gross</span>
                 </div>
-                <div className="rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-200">
-                  <p className="text-[10px] font-bold uppercase text-emerald-800">User Profit (70%)</p>
-                  <p className="num font-display text-xl font-black text-[#169443] mt-0.5">
-                    ₹{amazonSummary.totalUserProfit.toFixed(2)}
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-amber-50 p-3 ring-1 ring-amber-200">
-                  <p className="text-[10px] font-bold uppercase text-amber-800">Admin Cut (30%)</p>
-                  <p className="num font-display text-xl font-black text-amber-700 mt-0.5">
-                    ₹{amazonSummary.totalAdminCut.toFixed(2)}
-                  </p>
+
+                <div>
+                  <label className="font-bold text-ink">Brand Color</label>
+                  <input
+                    type="color"
+                    value={newStore.brandColor}
+                    onChange={(e) => setNewStore({ ...newStore, brandColor: e.target.value })}
+                    className="w-full h-10 rounded-xl bg-canvas p-1 border border-black/10 mt-1 cursor-pointer"
+                  />
                 </div>
               </div>
 
-              {/* Orders Detail Table if available */}
-              {amazonSummary.orders && amazonSummary.orders.length > 0 && (
-                <div className="overflow-hidden rounded-2xl border border-black/5">
-                  <div className="bg-canvas px-3 py-2 text-[10px] font-bold uppercase text-ink-faint flex items-center justify-between">
-                    <span>Matched Orders ({amazonSummary.orders.length})</span>
-                    <span>Allocations</span>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto divide-y divide-black/5 text-xs">
-                    {amazonSummary.orders.map((o: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between p-2.5 hover:bg-canvas/40">
-                        <div>
-                          <p className="font-bold text-ink flex items-center gap-1.5">
-                            <span>{o.orderId}</span>
-                            <span className="rounded-full bg-black/5 px-1.5 py-0.2 text-[9px] text-ink-soft font-mono">
-                              {o.ascsubtag}
-                            </span>
-                          </p>
-                          <p className="text-[10px] text-ink-soft">
-                            Sale: ₹{o.itemPrice.toFixed(2)} • Gross Fee: ₹{o.commission.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-[#169443]">
-                            +₹{o.userProfit.toFixed(2)}
-                          </p>
-                          <p className="text-[10px] text-amber-700 font-medium">
-                            Cut: ₹{o.adminCut.toFixed(2)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setAmazonSummaryModalOpen(false)}
-              className="w-full rounded-full bg-[#134024] py-2.5 text-xs font-bold text-white hover:bg-[#169443] transition shadow-md active:scale-95"
-            >
-              Done & Refresh Metrics
-            </button>
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-black/5">
+                <button
+                  type="button"
+                  onClick={() => setStoreModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-soft hover:bg-canvas"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#169443] hover:bg-[#134024] text-white text-xs font-bold transition shadow-xs"
+                >
+                  Save Store
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
