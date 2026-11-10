@@ -57,8 +57,32 @@ async function resolveLink(code: string): Promise<ExtendedCachedLink | null> {
         subId: true,
       },
     });
-    if (row) setCachedLink(code, row as any);
-    return row;
+    if (row) {
+      setCachedLink(code, row as any);
+      return row;
+    }
+
+    const short = await prisma.shortLink.findUnique({
+      where: { slug: code },
+      select: {
+        id: true,
+        userId: true,
+        subId: true,
+        targetUrl: true,
+        originalUrl: true,
+      },
+    });
+    if (short) {
+      const shortRow: ExtendedCachedLink = {
+        id: short.id,
+        userId: short.userId,
+        destinationUrl: short.targetUrl || short.originalUrl,
+        subId: short.subId,
+      };
+      setCachedLink(code, shortRow);
+      return shortRow;
+    }
+    return null;
   } catch (err) {
     console.warn("Database error in resolveLink:", err);
     return null;
