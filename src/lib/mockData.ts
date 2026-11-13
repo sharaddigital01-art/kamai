@@ -1190,6 +1190,13 @@ export function addOrUpdateMockStore(storeData: Partial<MockStore> & { name: str
   }
 }
 
+export function deleteMockStore(slugOrId: string): boolean {
+  if (!g.mockStores) g.mockStores = [...INITIAL_STORES];
+  const initialLen = g.mockStores.length;
+  g.mockStores = g.mockStores.filter((s) => s.slug !== slugOrId && s.id !== slugOrId);
+  return g.mockStores.length < initialLen;
+}
+
 // User Management
 export function findMockUserByEmail(email: string): MockUserRecord | undefined {
   if (!email || !g.mockUsers) return undefined;

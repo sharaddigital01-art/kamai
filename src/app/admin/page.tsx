@@ -92,19 +92,21 @@ export default function AdminPage() {
   const [stores, setStores] = useState<any[]>([]);
   const [deals, setDeals] = useState<any[]>([]);
 
-  // Store modal & rate editing state
-  const [editingStoreSlug, setEditingStoreSlug] = useState<string | null>(null);
-  const [editRatePct, setEditRatePct] = useState<string>("");
+  // Store modal & editing state
+  const [editingStore, setEditingStore] = useState<any | null>(null);
   const [storeModalOpen, setStoreModalOpen] = useState(false);
-  const [newStore, setNewStore] = useState({
+  const [storeForm, setStoreForm] = useState({
     name: "",
     slug: "",
-    commissionRateBps: 1000,
-    category: "fashion",
+    profitRatePct: "10.0",
+    status: "ACTIVE",
     brandColor: "#134024",
+    logoUrl: "",
+    confirmationDays: 60,
   });
 
   // Deal modal state
+  const [editingDealId, setEditingDealId] = useState<string | null>(null);
   const [dealModalOpen, setDealModalOpen] = useState(false);
   const [newDeal, setNewDeal] = useState({
     title: "",
@@ -321,23 +323,92 @@ export default function AdminPage() {
   };
 
   // --- Store Actions ---
-  async function handleAddStore(e: React.FormEvent) {
+  function handleOpenAddStore() {
+    setEditingStore(null);
+    setStoreForm({
+      name: "",
+      slug: "",
+      profitRatePct: "10.0",
+      status: "ACTIVE",
+      brandColor: "#134024",
+      logoUrl: "",
+      confirmationDays: 60,
+    });
+    setStoreModalOpen(true);
+  }
+
+  function handleOpenEditStore(store: any) {
+    setEditingStore(store);
+    const userShareBps = store.userShareBps || 6000;
+    const effRate = ((store.commissionRateBps * userShareBps) / 1000000).toFixed(1);
+    setStoreForm({
+      name: store.name || "",
+      slug: store.slug || "",
+      profitRatePct: effRate,
+      status: store.status || "ACTIVE",
+      brandColor: store.brandColor || "#134024",
+      logoUrl: store.logoUrl || "",
+      confirmationDays: store.confirmationDays || 60,
+    });
+    setStoreModalOpen(true);
+  }
+
+  async function handleSaveStore(e: React.FormEvent) {
     e.preventDefault();
-    if (!newStore.name || !newStore.slug) return;
+    if (!storeForm.name.trim() || !storeForm.slug.trim()) {
+      notify("Brand name and slug are required");
+      return;
+    }
+    const pct = parseFloat(storeForm.profitRatePct) || 10;
+    const userShareBps = 6000;
+    const commissionRateBps = Math.round((pct * 1000000) / userShareBps);
+
     try {
+      const payload = {
+        id: editingStore?.id,
+        name: storeForm.name.trim(),
+        slug: storeForm.slug.trim().toLowerCase(),
+        commissionRateBps,
+        userShareBps,
+        status: storeForm.status,
+        brandColor: storeForm.brandColor,
+        logoUrl: storeForm.logoUrl.trim() || null,
+        confirmationDays: Number(storeForm.confirmationDays) || 60,
+      };
+
       const res = await fetch("/api/admin/stores", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newStore),
+        body: JSON.stringify(payload),
       });
+
       if (res.ok) {
-        notify(`Store "${newStore.name}" added successfully!`);
+        notify(editingStore ? `Store "${storeForm.name}" updated!` : `Store "${storeForm.name}" added successfully!`);
         setStoreModalOpen(false);
-        setNewStore({ name: "", slug: "", commissionRateBps: 1000, category: "fashion", brandColor: "#134024" });
+        setEditingStore(null);
         await fetchAllData();
+      } else {
+        notify("Failed to save partner store");
       }
     } catch {
-      notify("Failed to add store");
+      notify("Network error while saving store");
+    }
+  }
+
+  async function handleDeleteStore(store: any) {
+    if (!confirm(`Are you sure you want to delete partner store "${store.name}"?`)) return;
+    try {
+      const res = await fetch(`/api/admin/stores?slug=${encodeURIComponent(store.slug)}&id=${encodeURIComponent(store.id || "")}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        notify(`Store "${store.name}" deleted successfully.`);
+        setStores((prev) => prev.filter((s) => s.slug !== store.slug && s.id !== store.id));
+      } else {
+        notify("Failed to delete store");
+      }
+    } catch {
+      notify("Network error while deleting store");
     }
   }
 
@@ -360,65 +431,70 @@ export default function AdminPage() {
     }
   }
 
-  async function handleSaveStoreRate(store: any) {
-    const pct = parseFloat(editRatePct);
-    if (isNaN(pct) || pct <= 0) {
-      notify("Please enter a valid profit percentage.");
-      return;
-    }
-    const userShareBps = store.userShareBps || 6000;
-    const commissionRateBps = Math.round((pct * 1000000) / userShareBps);
-
-    try {
-      const res = await fetch("/api/admin/stores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...store,
-          commissionRateBps,
-        }),
-      });
-      if (res.ok) {
-        notify(`Updated ${store.name} profit rate to Upto ${pct}%!`);
-        setEditingStoreSlug(null);
-        await fetchAllData();
-      }
-    } catch {
-      notify("Failed to update rate");
-    }
+  // --- Deal Actions ---
+  function handleOpenAddDeal() {
+    setEditingDealId(null);
+    setNewDeal({
+      title: "",
+      storeSlug: "flipkart",
+      price: "",
+      mrp: "",
+      imageUrl: "",
+      offerTag: "Mega Festive Bonanza",
+      destinationUrl: "",
+      category: "electronics",
+      isFeatured: true,
+      isActive: true,
+    });
+    setDealModalOpen(true);
   }
 
-  // --- Deal Actions ---
-  async function handleAddDeal(e: React.FormEvent) {
+  function handleOpenEditDeal(d: any) {
+    setEditingDealId(d.id);
+    const p = d.price ?? (d.pricePaise ? d.pricePaise / 100 : "");
+    const m = d.mrp ?? (d.mrpPaise ? d.mrpPaise / 100 : "");
+    const tag = d.offerTag || (Array.isArray(d.tags) && d.tags[0] ? d.tags[0] : "");
+    setNewDeal({
+      title: d.title || "",
+      storeSlug: d.storeSlug || d.store?.slug || "flipkart",
+      price: String(p || ""),
+      mrp: String(m || ""),
+      imageUrl: d.imageUrl || "",
+      offerTag: tag,
+      destinationUrl: d.destinationUrl || d.productUrl || "",
+      category: d.category || "electronics",
+      isFeatured: Boolean(d.isFeatured),
+      isActive: d.isActive !== undefined ? Boolean(d.isActive) : true,
+    });
+    setDealModalOpen(true);
+  }
+
+  async function handleSaveDeal(e: React.FormEvent) {
     e.preventDefault();
-    if (!newDeal.title || !newDeal.price || !newDeal.mrp) return;
+    if (!newDeal.title || !newDeal.price || !newDeal.mrp) {
+      notify("Title, price and MRP are required");
+      return;
+    }
     try {
+      const payload = {
+        ...newDeal,
+        id: editingDealId || undefined,
+        price: Number(newDeal.price),
+        mrp: Number(newDeal.mrp),
+        destinationUrl: newDeal.destinationUrl || `https://www.${newDeal.storeSlug}.com/dp/item-${Date.now()}`,
+      };
       const res = await fetch("/api/admin/deals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...newDeal,
-          price: Number(newDeal.price),
-          mrp: Number(newDeal.mrp),
-          destinationUrl: newDeal.destinationUrl || `https://www.${newDeal.storeSlug}.com/dp/item-${Date.now()}`,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        notify(`Deal "${newDeal.title}" published successfully!`);
+        notify(editingDealId ? `Deal "${newDeal.title}" updated successfully!` : `Deal "${newDeal.title}" published successfully!`);
         setDealModalOpen(false);
-        setNewDeal({
-          title: "",
-          storeSlug: "flipkart",
-          price: "",
-          mrp: "",
-          imageUrl: "",
-          offerTag: "Mega Festive Bonanza",
-          destinationUrl: "",
-          category: "electronics",
-          isFeatured: true,
-          isActive: true,
-        });
+        setEditingDealId(null);
         await fetchAllData();
+      } else {
+        notify("Failed to save deal");
       }
     } catch {
       notify("Failed to publish deal");
@@ -546,7 +622,7 @@ export default function AdminPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setDealModalOpen(true)}
+                  onClick={handleOpenAddDeal}
                   className="flex items-center gap-1.5 rounded-xl bg-[#169443] hover:bg-[#134024] px-4 py-2 text-xs font-bold text-white transition shadow-xs self-start sm:self-center"
                 >
                   <Plus className="h-4 w-4" /> Add New Deal
@@ -562,7 +638,7 @@ export default function AdminPage() {
                         <th className="py-3 px-3">Store</th>
                         <th className="py-3 px-3">Price / MRP</th>
                         <th className="py-3 px-3">Status</th>
-                        <th className="py-3 px-4 text-right">Actions</th>
+                        <th className="py-3 px-4 text-right min-w-[100px]">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/5">
@@ -575,58 +651,77 @@ export default function AdminPage() {
                           </td>
                         </tr>
                       ) : (
-                        deals.map((d) => (
-                          <tr key={d.id} className="hover:bg-canvas/40 transition">
-                            <td className="py-3 px-4 font-bold text-ink max-w-[240px]">
-                              <div className="flex items-center gap-2.5">
-                                {d.imageUrl && (
-                                  <img
-                                    src={d.imageUrl}
-                                    alt={d.title}
-                                    className="h-10 w-10 rounded-lg object-contain bg-canvas shrink-0 border border-black/5"
-                                  />
-                                )}
-                                <div>
-                                  <div className="truncate max-w-[200px]">{d.title}</div>
-                                  {d.offerTag && (
-                                    <span className="inline-block mt-0.5 rounded-md bg-amber-100 px-1.5 py-0.2 text-[10px] font-black text-amber-900 border border-amber-300">
-                                      {d.offerTag}
-                                    </span>
+                        deals.map((d) => {
+                          const priceVal = d.price ?? (d.pricePaise ? d.pricePaise / 100 : 0);
+                          const mrpVal = d.mrp ?? (d.mrpPaise ? d.mrpPaise / 100 : 0);
+                          const storeSlugVal = d.storeSlug || d.store?.slug || "partner";
+                          const offerTagVal = d.offerTag || (Array.isArray(d.tags) && d.tags[0] ? d.tags[0] : null);
+
+                          return (
+                            <tr key={d.id} className="hover:bg-canvas/40 transition">
+                              <td className="py-3 px-4 font-bold text-ink max-w-[240px]">
+                                <div className="flex items-center gap-2.5">
+                                  {d.imageUrl && (
+                                    <img
+                                      src={d.imageUrl}
+                                      alt={d.title}
+                                      className="h-10 w-10 rounded-lg object-contain bg-canvas shrink-0 border border-black/5"
+                                    />
                                   )}
+                                  <div>
+                                    <div className="truncate max-w-[200px]">{d.title}</div>
+                                    {offerTagVal && (
+                                      <span className="inline-block mt-0.5 rounded-md bg-amber-100 px-1.5 py-0.2 text-[10px] font-black text-amber-900 border border-amber-300">
+                                        {offerTagVal}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="py-3 px-3 font-semibold uppercase text-ink-soft">{d.storeSlug}</td>
-                            <td className="py-3 px-3 font-mono">
-                              <span className="font-bold text-ink">₹{d.price}</span>
-                              {d.mrp && <span className="line-through text-ink-muted ml-1.5 text-[11px]">₹{d.mrp}</span>}
-                            </td>
-                            <td className="py-3 px-3">
-                              <button
-                                type="button"
-                                onClick={() => toggleDealActive(d.id)}
-                                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
-                                  d.isActive
-                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                    : "bg-neutral-100 text-neutral-500"
-                                }`}
-                              >
-                                {d.isActive ? <ToggleRight className="h-3 w-3 text-emerald-600" /> : <ToggleLeft className="h-3 w-3" />}
-                                {d.isActive ? "Active" : "Hidden"}
-                              </button>
-                            </td>
-                            <td className="py-3 px-4 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteDeal(d.id)}
-                                className="rounded-lg p-1 text-ink-muted hover:text-red-600 hover:bg-red-50 transition"
-                                title="Delete Deal"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                              </td>
+                              <td className="py-3 px-3 font-semibold uppercase text-ink-soft">{storeSlugVal}</td>
+                              <td className="py-3 px-3 font-mono">
+                                <span className="font-bold text-ink">₹{priceVal}</span>
+                                {mrpVal > priceVal && (
+                                  <span className="line-through text-ink-muted ml-1.5 text-[11px]">₹{mrpVal}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDealActive(d.id)}
+                                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                                    d.isActive
+                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                      : "bg-neutral-100 text-neutral-500"
+                                  }`}
+                                >
+                                  {d.isActive ? <ToggleRight className="h-3 w-3 text-emerald-600" /> : <ToggleLeft className="h-3 w-3" />}
+                                  {d.isActive ? "Active" : "Hidden"}
+                                </button>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditDeal(d)}
+                                    className="rounded-lg p-1.5 text-ink-muted hover:text-ink hover:bg-canvas transition"
+                                    title="Edit Deal"
+                                  >
+                                    <Edit2 className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDeal(d.id)}
+                                    className="rounded-lg p-1.5 text-ink-muted hover:text-red-600 hover:bg-red-50 transition"
+                                    title="Delete Deal"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -649,7 +744,7 @@ export default function AdminPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setStoreModalOpen(true)}
+                  onClick={handleOpenAddStore}
                   className="flex items-center gap-1.5 rounded-xl bg-[#169443] hover:bg-[#134024] px-4 py-2 text-xs font-bold text-white transition shadow-xs self-start sm:self-center"
                 >
                   <Plus className="h-4 w-4" /> Add Partner Brand
@@ -664,71 +759,39 @@ export default function AdminPage() {
                         <th className="py-3 px-4">Brand</th>
                         <th className="py-3 px-3">Displayed Profit Rate</th>
                         <th className="py-3 px-3">Status</th>
-                        <th className="py-3 px-4 text-right">Quick Actions</th>
+                        <th className="py-3 px-4 text-right min-w-[100px]">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-black/5">
                       {stores.map((s) => {
-                        const isEditing = editingStoreSlug === s.slug;
                         const userShareBps = s.userShareBps || 6000;
                         const effectiveRatePct = ((s.commissionRateBps * userShareBps) / 1000000).toFixed(1);
 
                         return (
                           <tr key={s.id || s.slug} className="hover:bg-canvas/40 transition">
                             <td className="py-3 px-4 font-bold text-ink">
-                              <div className="flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: s.brandColor || "#134024" }} />
-                                <span>{s.name}</span>
-                                <span className="font-mono text-[10px] text-ink-muted">({s.slug})</span>
+                              <div className="flex items-center gap-2.5">
+                                {s.logoUrl ? (
+                                  <img
+                                    src={s.logoUrl}
+                                    alt={s.name}
+                                    className="h-7 w-7 rounded-lg object-contain bg-canvas shrink-0 border border-black/5"
+                                  />
+                                ) : (
+                                  <span
+                                    className="h-3.5 w-3.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: s.brandColor || "#134024" }}
+                                  />
+                                )}
+                                <div className="min-w-0">
+                                  <div className="font-bold text-ink">{s.name}</div>
+                                  <div className="font-mono text-[10px] text-ink-muted">{s.slug}</div>
+                                </div>
                               </div>
                             </td>
 
                             <td className="py-3 px-3">
-                              {isEditing ? (
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="number"
-                                    step="0.1"
-                                    value={editRatePct}
-                                    onChange={(e) => setEditRatePct(e.target.value)}
-                                    placeholder={effectiveRatePct}
-                                    className="w-16 rounded-lg bg-canvas px-2 py-1 text-xs font-bold text-ink border border-black/10 focus:outline-none"
-                                    autoFocus
-                                  />
-                                  <span className="text-xs font-bold text-ink-soft">%</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveStoreRate(s)}
-                                    className="rounded-lg bg-[#169443] p-1 text-white hover:bg-[#134024]"
-                                    title="Save Rate"
-                                  >
-                                    <Save className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setEditingStoreSlug(null)}
-                                    className="rounded-lg bg-canvas p-1 text-ink-soft hover:text-ink"
-                                    title="Cancel"
-                                  >
-                                    <X className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-[#169443]">Upto {effectiveRatePct}% Profit</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingStoreSlug(s.slug);
-                                      setEditRatePct(effectiveRatePct);
-                                    }}
-                                    className="text-ink-muted hover:text-ink transition"
-                                    title="Edit Rate"
-                                  >
-                                    <Edit2 className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              )}
+                              <span className="font-bold text-[#169443]">Upto {effectiveRatePct}% Profit</span>
                             </td>
 
                             <td className="py-3 px-3">
@@ -746,13 +809,24 @@ export default function AdminPage() {
                             </td>
 
                             <td className="py-3 px-4 text-right">
-                              <button
-                                type="button"
-                                onClick={() => toggleStoreStatus(s)}
-                                className="text-xs font-semibold text-ink-soft hover:text-ink underline"
-                              >
-                                {s.status === "ACTIVE" ? "Pause Store" : "Activate"}
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditStore(s)}
+                                  className="rounded-lg p-1.5 text-ink-muted hover:text-ink hover:bg-canvas transition"
+                                  title="Edit Store"
+                                >
+                                  <Edit2 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteStore(s)}
+                                  className="rounded-lg p-1.5 text-ink-muted hover:text-red-600 hover:bg-red-50 transition"
+                                  title="Delete Store"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -771,17 +845,22 @@ export default function AdminPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in">
           <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-black/5">
-              <h3 className="font-display font-black text-base text-ink">Publish New Deal / Banner</h3>
+              <h3 className="font-display font-black text-base text-ink">
+                {editingDealId ? "Edit Featured Deal" : "Publish New Deal / Banner"}
+              </h3>
               <button
                 type="button"
-                onClick={() => setDealModalOpen(false)}
+                onClick={() => {
+                  setDealModalOpen(false);
+                  setEditingDealId(null);
+                }}
                 className="rounded-full p-1 text-ink-muted hover:bg-canvas hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleAddDeal} className="space-y-3.5 text-xs pt-4">
+            <form onSubmit={handleSaveDeal} className="space-y-3.5 text-xs pt-4">
               <div>
                 <label className="font-bold text-ink">Deal Title *</label>
                 <input
@@ -872,7 +951,7 @@ export default function AdminPage() {
               </div>
 
               <div>
-                <label className="font-bold text-ink">Destination URL</label>
+                <label className="font-bold text-ink">Destination / Affiliate URL</label>
                 <input
                   type="url"
                   placeholder="https://www.flipkart.com/..."
@@ -885,7 +964,10 @@ export default function AdminPage() {
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-black/5">
                 <button
                   type="button"
-                  onClick={() => setDealModalOpen(false)}
+                  onClick={() => {
+                    setDealModalOpen(false);
+                    setEditingDealId(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-soft hover:bg-canvas"
                 >
                   Cancel
@@ -894,7 +976,7 @@ export default function AdminPage() {
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-[#169443] hover:bg-[#134024] text-white text-xs font-bold transition shadow-xs"
                 >
-                  Publish Deal
+                  {editingDealId ? "Update Deal" : "Publish Deal"}
                 </button>
               </div>
             </form>
@@ -902,33 +984,38 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* MODAL: ADD STORE */}
+      {/* MODAL: ADD / EDIT STORE */}
       {storeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in">
           <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-black/5">
-              <h3 className="font-display font-black text-base text-ink">Add Partner Brand</h3>
+              <h3 className="font-display font-black text-base text-ink">
+                {editingStore ? "Edit Partner Brand" : "Add Partner Brand"}
+              </h3>
               <button
                 type="button"
-                onClick={() => setStoreModalOpen(false)}
+                onClick={() => {
+                  setStoreModalOpen(false);
+                  setEditingStore(null);
+                }}
                 className="rounded-full p-1 text-ink-muted hover:bg-canvas hover:text-ink"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <form onSubmit={handleAddStore} className="space-y-3.5 text-xs pt-4">
+            <form onSubmit={handleSaveStore} className="space-y-3.5 text-xs pt-4">
               <div>
                 <label className="font-bold text-ink">Brand Name *</label>
                 <input
                   required
                   placeholder="e.g. Myntra"
-                  value={newStore.name}
+                  value={storeForm.name}
                   onChange={(e) =>
-                    setNewStore({
-                      ...newStore,
+                    setStoreForm({
+                      ...storeForm,
                       name: e.target.value,
-                      slug: e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""),
+                      slug: editingStore ? storeForm.slug : e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""),
                     })
                   }
                   className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
@@ -940,39 +1027,67 @@ export default function AdminPage() {
                 <input
                   required
                   placeholder="e.g. myntra"
-                  value={newStore.slug}
-                  onChange={(e) => setNewStore({ ...newStore, slug: e.target.value })}
+                  value={storeForm.slug}
+                  onChange={(e) => setStoreForm({ ...storeForm, slug: e.target.value })}
                   className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 font-mono focus:bg-white"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="font-bold text-ink">Commission Rate (BPS)</label>
+                  <label className="font-bold text-ink">Profit Rate (%)</label>
                   <input
                     type="number"
-                    value={newStore.commissionRateBps}
-                    onChange={(e) => setNewStore({ ...newStore, commissionRateBps: Number(e.target.value) })}
+                    step="0.1"
+                    placeholder="10.0"
+                    value={storeForm.profitRatePct}
+                    onChange={(e) => setStoreForm({ ...storeForm, profitRatePct: e.target.value })}
                     className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
                   />
-                  <span className="text-[10px] text-ink-muted">1000 bps = 10% gross</span>
+                  <span className="text-[10px] text-ink-muted">e.g. 10.0 = Upto 10% Profit</span>
                 </div>
 
                 <div>
-                  <label className="font-bold text-ink">Brand Color</label>
-                  <input
-                    type="color"
-                    value={newStore.brandColor}
-                    onChange={(e) => setNewStore({ ...newStore, brandColor: e.target.value })}
-                    className="w-full h-10 rounded-xl bg-canvas p-1 border border-black/10 mt-1 cursor-pointer"
-                  />
+                  <label className="font-bold text-ink">Status</label>
+                  <select
+                    value={storeForm.status}
+                    onChange={(e) => setStoreForm({ ...storeForm, status: e.target.value })}
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="PAUSED">Paused</option>
+                  </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Logo URL / Image</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={storeForm.logoUrl}
+                  onChange={(e) => setStoreForm({ ...storeForm, logoUrl: e.target.value })}
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Brand Accent Color</label>
+                <input
+                  type="color"
+                  value={storeForm.brandColor}
+                  onChange={(e) => setStoreForm({ ...storeForm, brandColor: e.target.value })}
+                  className="w-full h-10 rounded-xl bg-canvas p-1 border border-black/10 mt-1 cursor-pointer"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-black/5">
                 <button
                   type="button"
-                  onClick={() => setStoreModalOpen(false)}
+                  onClick={() => {
+                    setStoreModalOpen(false);
+                    setEditingStore(null);
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-soft hover:bg-canvas"
                 >
                   Cancel
@@ -981,7 +1096,7 @@ export default function AdminPage() {
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-[#169443] hover:bg-[#134024] text-white text-xs font-bold transition shadow-xs"
                 >
-                  Save Store
+                  {editingStore ? "Update Store" : "Save Store"}
                 </button>
               </div>
             </form>

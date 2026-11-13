@@ -11,9 +11,16 @@ export async function GET() {
     getPartnerStores(),
   ]);
 
-  return NextResponse.json({
-    banners,
-    featuredDeals,
-    partnerStores: partnerStores.filter((s) => s.status === "ACTIVE"),
-  });
+  return NextResponse.json(
+    {
+      banners,
+      featuredDeals,
+      partnerStores: partnerStores.filter((s) => s.status === "ACTIVE"),
+    },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+      },
+    }
+  );
 }

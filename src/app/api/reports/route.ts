@@ -391,12 +391,33 @@ async function handleReports(req: Request) {
         }),
       ]);
 
-      // Calculate lifetime balances across all history
+      // Calculate lifetime balances across all history with strict deduplication
+      const seenLifetimeOrderKeys = new Set<string>();
       for (const row of allUserRows) {
+        const key = String(row.externalOrderId || row.id || "").trim();
+        if (key) seenLifetimeOrderKeys.add(key);
+
         if (row.status === "PENDING") balances.pending += row.userAmountPaise;
         else if (row.status === "CONFIRMED")
           balances.available += row.userAmountPaise;
         else if (row.status === "PAID") balances.paid += row.userAmountPaise;
+      }
+
+      // Add only non-duplicate conversions
+      for (const c of allUserConversions) {
+        const key = String(c.transactionId || c.id || "").trim();
+        if (key && seenLifetimeOrderKeys.has(key)) continue; // already accounted for in ledger rows
+
+        const st = String(c.status || "").toLowerCase();
+        if (st === "paid" || st === "confirmed" || st === "approved") {
+          if (key) seenLifetimeOrderKeys.add(key);
+          const userCutPaise = Math.round(Number(c.commission || 0) * 70);
+          balances.available += userCutPaise;
+        } else if (st === "pending" || st === "open") {
+          if (key) seenLifetimeOrderKeys.add(key);
+          const userCutPaise = Math.round(Number(c.commission || 0) * 70);
+          balances.pending += userCutPaise;
+        }
       }
 
       const inWithdrawal = locked._sum.amountPaise ?? 0;
@@ -407,28 +428,6 @@ async function handleReports(req: Request) {
         balances.available +
         balances.inWithdrawal +
         balances.paid;
-
-      const approvedConversions = allUserConversions.filter(
-        (c) =>
-          c.status === "PAID" ||
-          c.status === "CONFIRMED" ||
-          c.status === "confirmed"
-      );
-      const approvedCommissionPaise = approvedConversions.reduce(
-        (acc, c) => acc + Math.round(c.commission * 100),
-        0
-      );
-
-      if (approvedCommissionPaise > 0) {
-        balances.lifetime = Math.max(balances.lifetime, approvedCommissionPaise);
-        balances.available = Math.max(
-          0,
-          balances.lifetime -
-            balances.pending -
-            balances.inWithdrawal -
-            balances.paid
-        );
-      }
 
       // Filter rows and conversions strictly by the requested date range
       const filteredLedgerRows = allUserRows.filter((r) => {
@@ -490,52 +489,36 @@ async function handleReports(req: Request) {
           ? Math.max(periodClicksCount, sumShort + sumGen)
           : periodClicksCount;
 
-      // Count successful orders in the selected range
-      const successfulOrderIds = new Set<string>();
-      for (const c of filteredConversions) {
-        const st = String(c.status || "").toLowerCase();
-        if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
-          successfulOrderIds.add(String(c.transactionId || c.id));
-        }
-      }
+      // Count distinct successful orders and profit in the selected range without duplication
+      const seenPeriodOrderKeys = new Set<string>();
+      let distinctPeriodTxns = 0;
+      let calculatedPeriodProfit = 0;
+
       for (const r of filteredLedgerRows) {
         const st = String(r.status || "").toLowerCase();
         if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
-          successfulOrderIds.add(String(r.externalOrderId || r.id));
+          const key = String(r.externalOrderId || r.id || "").trim();
+          if (key) seenPeriodOrderKeys.add(key);
+          calculatedPeriodProfit += safePaise(r.userAmountPaise);
+          distinctPeriodTxns++;
         }
       }
 
-      totalTxns = Math.max(
-        successfulOrderIds.size,
-        filteredConversions.filter((c) => {
-          const st = String(c.status || "").toLowerCase();
-          return st !== "rejected" && st !== "cancelled" && st !== "failed";
-        }).length,
-        filteredLedgerRows.filter((r) => {
-          const st = String(r.status || "").toLowerCase();
-          return st !== "rejected" && st !== "cancelled" && st !== "failed";
-        }).length
-      );
+      for (const c of filteredConversions) {
+        const st = String(c.status || "").toLowerCase();
+        if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
+          const key = String(c.transactionId || c.id || "").trim();
+          if (!key || !seenPeriodOrderKeys.has(key)) {
+            if (key) seenPeriodOrderKeys.add(key);
+            calculatedPeriodProfit += safeCommissionPaise(c.commission);
+            distinctPeriodTxns++;
+          }
+        }
+      }
 
-      // Period profit: dynamically sum all valid non-rejected earnings in this date range
-      const periodLedgerProfit = filteredLedgerRows
-        .filter((r) => {
-          const st = String(r.status || "").toUpperCase();
-          return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
-        })
-        .reduce((sum, r) => sum + safePaise(r.userAmountPaise), 0);
-
-      const periodConvProfit = filteredConversions
-        .filter((c) => {
-          const st = String(c.status || "").toLowerCase();
-          return st !== "rejected" && st !== "cancelled" && st !== "failed";
-        })
-        .reduce((sum, c) => sum + safeCommissionPaise(c.commission), 0);
-
+      totalTxns = distinctPeriodTxns;
       periodProfitPaise =
-        queryRange === "all"
-          ? balances.lifetime
-          : Math.max(periodLedgerProfit, periodConvProfit);
+        queryRange === "all" ? balances.lifetime : calculatedPeriodProfit;
 
       // Construct graph daily/hourly stats tailored to requested period
       if (queryRange === "today") {
@@ -781,39 +764,35 @@ async function handleReports(req: Request) {
         ? Math.max(getLiveTotalClicks(user.id), allClicks.length)
         : filteredClicks.length;
 
-    totalTxns = Math.max(
-      filteredConversions.filter(
-        (c) => {
-          const st = String(c.status || "").toLowerCase();
-          return st !== "rejected" && st !== "cancelled" && st !== "failed";
+    const seenFallbackOrderKeys = new Set<string>();
+    let fallbackTxns = 0;
+    let fallbackProfit = 0;
+
+    for (const l of filteredLedger) {
+      const st = String(l.status || "").toUpperCase();
+      if (st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED") {
+        const key = String((l as any).externalOrderId || l.id || "").trim();
+        if (key) seenFallbackOrderKeys.add(key);
+        fallbackProfit += safePaise(l.userAmountPaise);
+        fallbackTxns++;
+      }
+    }
+
+    for (const c of filteredConversions) {
+      const st = String(c.status || "").toLowerCase();
+      if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
+        const key = String(c.transactionId || c.id || "").trim();
+        if (!key || !seenFallbackOrderKeys.has(key)) {
+          if (key) seenFallbackOrderKeys.add(key);
+          fallbackProfit += safeCommissionPaise(c.commission);
+          fallbackTxns++;
         }
-      ).length,
-      filteredLedger.filter(
-        (l) => {
-          const st = String(l.status || "").toUpperCase();
-          return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
-        }
-      ).length
-    );
+      }
+    }
 
-    const periodLedgerProfit = filteredLedger
-      .filter((l) => {
-        const st = String(l.status || "").toUpperCase();
-        return st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED";
-      })
-      .reduce((sum, l) => sum + safePaise(l.userAmountPaise), 0);
-
-    const periodConvProfit = filteredConversions
-      .filter((c) => {
-        const st = String(c.status || "").toLowerCase();
-        return st !== "rejected" && st !== "cancelled" && st !== "failed";
-      })
-      .reduce((sum, c) => sum + safeCommissionPaise(c.commission), 0);
-
+    totalTxns = fallbackTxns;
     periodProfitPaise =
-      queryRange === "all"
-        ? balances.lifetime
-        : Math.max(periodLedgerProfit, periodConvProfit);
+      queryRange === "all" ? balances.lifetime : fallbackProfit;
 
     const labels =
       queryRange === "today"

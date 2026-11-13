@@ -12,6 +12,7 @@ import {
   Sparkles,
   RefreshCw,
   Percent,
+  Trash2,
 } from "lucide-react";
 import { PartnerStoreItem } from "@/app/admin/content/contentStore";
 import { ConfirmationModal } from "./ConfirmationModal";
@@ -32,6 +33,96 @@ export function PartnerStoresCMS({
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editRatePct, setEditRatePct] = useState<string>("");
   const [updating, setUpdating] = useState<string | null>(null);
+
+  // Full Edit Modal State
+  const [fullEditModalOpen, setFullEditModalOpen] = useState(false);
+  const [fullEditForm, setFullEditForm] = useState({
+    name: "",
+    slug: "",
+    displayedProfitPct: "10.0",
+    status: "ACTIVE" as "ACTIVE" | "PAUSED",
+    logoUrl: "",
+    brandColor: "#134024",
+  });
+
+  const handleOpenFullEdit = (store: PartnerStoreItem) => {
+    const userShareBps = store.userShareBps || 6000;
+    const currentPct = ((store.commissionRateBps * userShareBps) / 1000000).toFixed(1);
+    setFullEditForm({
+      name: store.name || "",
+      slug: store.slug || "",
+      displayedProfitPct: currentPct,
+      status: store.status || "ACTIVE",
+      logoUrl: store.logoUrl || "",
+      brandColor: store.brandColor || "#134024",
+    });
+    setFullEditModalOpen(true);
+  };
+
+  const handleSaveFullEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullEditForm.name.trim() || !fullEditForm.slug.trim()) {
+      notify("Store name and slug are required");
+      return;
+    }
+    const pct = parseFloat(fullEditForm.displayedProfitPct);
+    if (isNaN(pct) || pct <= 0) {
+      notify("Please enter a valid profit percentage.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/admin/content/api/stores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: fullEditForm.slug,
+          name: fullEditForm.name.trim(),
+          status: fullEditForm.status,
+          displayedProfitPct: pct,
+          logoUrl: fullEditForm.logoUrl.trim() || null,
+          brandColor: fullEditForm.brandColor,
+        }),
+      });
+
+      if (res.ok) {
+        notify(`Store "${fullEditForm.name}" updated successfully!`);
+        setFullEditModalOpen(false);
+        await onRefresh();
+      } else {
+        notify("Failed to save store changes");
+      }
+    } catch {
+      notify("Network error while saving store");
+    }
+  };
+
+  const handleDeleteStoreClick = (store: PartnerStoreItem) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Delete Partner Merchant",
+      message: `Are you sure you want to delete "${store.name}"? This removes the store from partner listings.`,
+      confirmText: "Delete Merchant",
+      isDestructive: true,
+      action: async () => {
+        try {
+          const res = await fetch(`/admin/content/api/stores?slug=${encodeURIComponent(store.slug)}`, {
+            method: "DELETE",
+          });
+          if (res.ok) {
+            notify(`Store "${store.name}" deleted successfully.`);
+            await onRefresh();
+          } else {
+            notify("Failed to delete store.");
+          }
+        } catch {
+          notify("Network error while deleting store.");
+        } finally {
+          setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+        }
+      },
+    });
+  };
 
   // Confirmation modal
   const [confirmModal, setConfirmModal] = useState<{
@@ -270,13 +361,24 @@ export function PartnerStoresCMS({
 
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleStartEdit(s)}
-                        className="text-xs font-semibold text-[#169443] hover:underline"
-                      >
-                        Edit Tag
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenFullEdit(s)}
+                          className="rounded-lg p-1.5 text-ink-muted hover:text-ink hover:bg-canvas transition"
+                          title="Full Edit Store"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStoreClick(s)}
+                          className="rounded-lg p-1.5 text-ink-muted hover:text-red-600 hover:bg-red-50 transition"
+                          title="Delete Store"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -285,6 +387,129 @@ export function PartnerStoresCMS({
           </table>
         </div>
       </div>
+
+      {/* Full Edit Store Modal */}
+      {fullEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-black/5">
+              <h3 className="font-display font-black text-base text-ink">
+                Edit Partner Brand
+              </h3>
+              <button
+                type="button"
+                onClick={() => setFullEditModalOpen(false)}
+                className="rounded-full p-1 text-ink-muted hover:bg-canvas hover:text-ink"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFullEdit} className="space-y-3.5 text-xs pt-4">
+              <div>
+                <label className="font-bold text-ink">Brand Name *</label>
+                <input
+                  required
+                  placeholder="e.g. Myntra"
+                  value={fullEditForm.name}
+                  onChange={(e) =>
+                    setFullEditForm({ ...fullEditForm, name: e.target.value })
+                  }
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Slug *</label>
+                <input
+                  required
+                  disabled
+                  value={fullEditForm.slug}
+                  className="w-full rounded-xl bg-neutral-100 text-neutral-500 p-2.5 border border-black/10 mt-1 font-mono cursor-not-allowed"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="font-bold text-ink">Profit Rate (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="10.0"
+                    value={fullEditForm.displayedProfitPct}
+                    onChange={(e) =>
+                      setFullEditForm({
+                        ...fullEditForm,
+                        displayedProfitPct: e.target.value,
+                      })
+                    }
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  />
+                  <span className="text-[10px] text-ink-muted">e.g. 10.0 = Upto 10% Profit</span>
+                </div>
+
+                <div>
+                  <label className="font-bold text-ink">Status</label>
+                  <select
+                    value={fullEditForm.status}
+                    onChange={(e) =>
+                      setFullEditForm({
+                        ...fullEditForm,
+                        status: e.target.value as "ACTIVE" | "PAUSED",
+                      })
+                    }
+                    className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                  >
+                    <option value="ACTIVE">Active</option>
+                    <option value="PAUSED">Paused</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Logo URL / Image</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={fullEditForm.logoUrl}
+                  onChange={(e) =>
+                    setFullEditForm({ ...fullEditForm, logoUrl: e.target.value })
+                  }
+                  className="w-full rounded-xl bg-canvas p-2.5 border border-black/10 mt-1 focus:bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-ink">Brand Accent Color</label>
+                <input
+                  type="color"
+                  value={fullEditForm.brandColor}
+                  onChange={(e) =>
+                    setFullEditForm({ ...fullEditForm, brandColor: e.target.value })
+                  }
+                  className="w-full h-10 rounded-xl bg-canvas p-1 border border-black/10 mt-1 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-black/5">
+                <button
+                  type="button"
+                  onClick={() => setFullEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-ink-soft hover:bg-canvas"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#169443] hover:bg-[#134024] text-white text-xs font-bold transition shadow-xs"
+                >
+                  Save Store Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Confirmation Modal */}
       <ConfirmationModal

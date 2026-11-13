@@ -458,13 +458,20 @@ export default function ReportsPage() {
   const periodLedger = ledger.filter(isInTabWindow);
   const periodConversions = conversions.filter(isInTabWindow);
 
-  // Compute brand aggregations from filtered ledger and conversions
+  // Deduplicate orders across ledger and conversions so the same order is never counted twice
+  const seenOrderIds = new Set<string>();
   const brandStatsMap = new Map<
     string,
     { name: string; slug: string; txns: number; profit: number }
   >();
 
   for (const row of periodLedger) {
+    const st = String(row.status || "").toLowerCase();
+    if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+
+    const orderKey = String(row.externalOrderId || row.id || "").trim();
+    if (orderKey) seenOrderIds.add(orderKey);
+
     const storeName = row.store?.name || "Partner Store";
     const storeSlug =
       (row.store?.name || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
@@ -481,14 +488,21 @@ export default function ReportsPage() {
   }
 
   for (const conv of periodConversions) {
+    const st = String(conv.status || "").toLowerCase();
+    if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+
+    const orderKey = String(conv.transactionId || conv.id || "").trim();
+    // Skip if already accounted for in ledger
+    if (orderKey && seenOrderIds.has(orderKey)) {
+      continue;
+    }
+    if (orderKey) seenOrderIds.add(orderKey);
+
     const storeName = conv.storeName || "Partner Store";
     const storeSlug =
       (conv.storeName || "").toLowerCase().replace(/[^a-z0-9]/g, "") ||
       "general";
-    const st = String(conv.status || "").toLowerCase();
-    const isNotRejected =
-      st !== "rejected" && st !== "cancelled" && st !== "failed";
-    const profitPaise = isNotRejected ? safeCommissionPaise(conv.commission) : 0;
+    const profitPaise = safeCommissionPaise(conv.commission);
 
     if (!brandStatsMap.has(storeSlug)) {
       brandStatsMap.set(storeSlug, {
@@ -505,33 +519,34 @@ export default function ReportsPage() {
     }
   }
 
-  // Calculate sum of brand profits and total transactions
+  // Calculate sum of brand profits and total transactions from deduplicated set
   const totalBrandProfit = Array.from(brandStatsMap.values()).reduce(
     (sum, b) => sum + (safePaise(b.profit) || 0),
     0
   );
-  const totalBrandTxns = Math.max(
-    period === "all" ? stats.totalTransactions : periodLedger.length + periodConversions.length,
-    Array.from(brandStatsMap.values()).reduce((sum, b) => sum + (b.txns || 0), 0)
+  const totalBrandTxns = Array.from(brandStatsMap.values()).reduce(
+    (sum, b) => sum + (b.txns || 0),
+    0
   );
 
-  // The actual profit to display on the PROFIT card and TOTAL table row
+  // The single source of truth for display profit across hero card, key metrics, and brand table
   const displayProfitPaise =
-    period === "all"
-      ? Math.max(safePaise(stats.totalProfitPaise), totalBrandProfit)
-      : totalBrandProfit > 0
+    totalBrandProfit > 0
       ? totalBrandProfit
-      : safePaise(stats.totalProfitPaise);
+      : safePaise(stats.totalProfitPaise) || safePaise(balances.lifetime) || 0;
+
+  const displayOrdersCount =
+    totalBrandTxns > 0 ? totalBrandTxns : stats.totalTransactions;
 
   const brandRows =
     brandStatsMap.size > 0
       ? Array.from(brandStatsMap.values())
-      : totalBrandTxns > 0
+      : displayOrdersCount > 0
       ? [
           {
             name: "Flipkart",
             slug: "flipkart",
-            txns: totalBrandTxns,
+            txns: displayOrdersCount,
             profit: displayProfitPaise,
           },
           { name: "Myntra", slug: "myntra", txns: 0, profit: 0 },
@@ -548,16 +563,18 @@ export default function ReportsPage() {
   // Dynamic conversion rate calculation:
   // Guarded formula: clicks > 0 ? ((orders / clicks) * 100).toFixed(1) + '%' : '0%'
   // Capped at 100% and clicks guaranteed to reflect true traffic (at least orders).
-  const effectiveClicks = Math.max(stats.totalClicks, stats.totalTransactions);
+  const effectiveClicks = Math.max(stats.totalClicks, displayOrdersCount);
   const convPct =
     effectiveClicks > 0
-      ? Math.min(100, Math.max(0, (stats.totalTransactions / effectiveClicks) * 100))
+      ? Math.min(100, Math.max(0, (displayOrdersCount / effectiveClicks) * 100))
       : 0;
   const displayConvRate =
     effectiveClicks > 0 ? `${convPct.toFixed(1)}%` : "0%";
 
   const allTimeProfit =
-    stats.allTimeProfitPaise || balances.lifetime || stats.totalProfitPaise || 0;
+    period === "all"
+      ? displayProfitPaise
+      : stats.allTimeProfitPaise || balances.lifetime || displayProfitPaise || 0;
 
   return (
     <div className="space-y-6 pt-2 pb-14 max-w-xl mx-auto">
@@ -765,7 +782,7 @@ export default function ReportsPage() {
               Orders
             </p>
             <p className="num font-display text-xl font-black text-ink">
-              {stats.totalTransactions}
+              {displayOrdersCount}
             </p>
           </div>
 

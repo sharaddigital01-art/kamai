@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getApiUser, isAdminEmail } from "@/lib/auth";
-import { getPartnerStores, updatePartnerStore } from "../../contentStore";
+import { getPartnerStores, updatePartnerStore, deletePartnerStore } from "../../contentStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,16 +40,19 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { slug, status, displayedProfitPct, commissionRateBps } = body;
+  const { slug, name, status, displayedProfitPct, commissionRateBps, logoUrl, brandColor } = body;
 
   if (!slug) {
     return NextResponse.json({ error: "Store slug is required." }, { status: 400 });
   }
 
   const updated = await updatePartnerStore(slug, {
+    name,
     status,
     displayedProfitPct: displayedProfitPct !== undefined ? Number(displayedProfitPct) : undefined,
     commissionRateBps: commissionRateBps !== undefined ? Number(commissionRateBps) : undefined,
+    logoUrl,
+    brandColor,
   });
 
   if (!updated) {
@@ -61,4 +64,23 @@ export async function POST(req: Request) {
     store: updated,
     message: `Store ${updated.name} updated successfully.`,
   });
+}
+
+export async function DELETE(req: Request) {
+  const admin = await getApiUser().catch(() => null);
+  if (!checkAdminAuth(admin)) {
+    return NextResponse.json(
+      { error: "Access denied. Admin authorization required." },
+      { status: 403 }
+    );
+  }
+
+  const { searchParams } = new URL(req.url);
+  const slug = searchParams.get("slug");
+  if (!slug) {
+    return NextResponse.json({ error: "Store slug is required." }, { status: 400 });
+  }
+
+  const success = await deletePartnerStore(slug);
+  return NextResponse.json({ success, message: `Store ${slug} deleted.` });
 }

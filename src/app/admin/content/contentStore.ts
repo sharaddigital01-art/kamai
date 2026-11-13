@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isDatabaseConfigured, getLiveStores } from "@/lib/mockData";
+import { isDatabaseConfigured, getLiveStores, deleteMockStore } from "@/lib/mockData";
 import { createSupabaseServer } from "@/lib/supabase/server";
 
 export interface AppBannerItem {
@@ -462,9 +462,12 @@ export async function getPartnerStores(): Promise<PartnerStoreItem[]> {
 export async function updatePartnerStore(
   slug: string,
   data: {
+    name?: string;
     status?: "ACTIVE" | "PAUSED";
     displayedProfitPct?: number;
     commissionRateBps?: number;
+    logoUrl?: string | null;
+    brandColor?: string;
   }
 ): Promise<PartnerStoreItem | null> {
   if (isDatabaseConfigured()) {
@@ -482,7 +485,10 @@ export async function updatePartnerStore(
         const updated = await prisma.partnerStore.update({
           where: { slug },
           data: {
+            ...(data.name ? { name: data.name } : {}),
             ...(data.status ? { status: data.status } : {}),
+            ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl } : {}),
+            ...(data.brandColor ? { brandColor: data.brandColor } : {}),
             commissionRateBps: nextBps,
           },
         });
@@ -509,7 +515,10 @@ export async function updatePartnerStore(
   const store = live.find((s) => s.slug === slug);
   if (!store) return null;
 
+  if (data.name) store.name = data.name;
   if (data.status) store.status = data.status;
+  if (data.logoUrl !== undefined) store.logoUrl = data.logoUrl || undefined;
+  if (data.brandColor) store.brandColor = data.brandColor;
   if (data.displayedProfitPct !== undefined) {
     const userShareBps = store.userShareBps || 6000;
     store.commissionRateBps = Math.round((data.displayedProfitPct * 1000000) / userShareBps);
@@ -530,4 +539,16 @@ export async function updatePartnerStore(
     brandColor: store.brandColor,
     logoUrl: store.logoUrl,
   };
+}
+
+export async function deletePartnerStore(slug: string): Promise<boolean> {
+  if (isDatabaseConfigured()) {
+    try {
+      await prisma.partnerStore.delete({ where: { slug } });
+      return true;
+    } catch {
+      // Proceed to memory
+    }
+  }
+  return deleteMockStore(slug);
 }

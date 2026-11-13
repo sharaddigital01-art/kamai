@@ -101,10 +101,20 @@ export function UserManagementTab({
     setTimeout(() => setCopiedSubId(null), 2000);
   };
 
-  const totalUsers = stats?.totalUsers ?? users.length;
-  const activeUsers = stats?.activeUsers ?? users.filter((u) => !u.isSuspended).length;
-  const suspendedUsers = stats?.suspendedUsers ?? users.filter((u) => u.isSuspended).length;
-  const tgConnected = stats?.telegramConnected ?? users.filter((u) => u.telegramConfig?.connected).length;
+  const totalUsers =
+    stats && stats.totalUsers > 0 ? stats.totalUsers : users.length;
+  const activeUsers =
+    stats && stats.totalUsers > 0
+      ? stats.activeUsers
+      : users.filter((u) => !u.isSuspended).length;
+  const suspendedUsers =
+    stats && stats.totalUsers > 0
+      ? stats.suspendedUsers
+      : users.filter((u) => u.isSuspended).length;
+  const tgConnected =
+    stats && stats.totalUsers > 0
+      ? stats.telegramConnected
+      : users.filter((u) => u.telegramConfig?.connected).length;
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -201,7 +211,7 @@ export function UserManagementTab({
       {/* Users Table */}
       <div className="rounded-3xl border border-black/5 bg-white shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="w-full min-w-[760px] text-left border-collapse text-xs">
             <thead>
               <tr className="border-b border-black/5 bg-canvas/60 text-ink-soft font-bold uppercase tracking-wider text-[10px]">
                 <th className="py-3.5 px-4">User Details</th>
@@ -210,7 +220,7 @@ export function UserManagementTab({
                 <th className="py-3.5 px-4">Telegram Bot</th>
                 <th className="py-3.5 px-4 text-right">Lifetime Profit</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="py-3.5 px-4 text-right min-w-[150px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">

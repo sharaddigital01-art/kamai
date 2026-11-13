@@ -37,45 +37,45 @@ export async function GET() {
 
   if (isDatabaseConfigured()) {
     try {
-      // 1. Fetch users with telegram config and payout account
-      const dbUsers = await prisma.user.findMany({
-        orderBy: { createdAt: "desc" },
-        include: {
-          telegramConfig: {
-            select: {
-              telegramUserId: true,
-              telegramUsername: true,
-              targetChannelName: true,
-              targetChannelId: true,
-              isActive: true,
+      // 1. Fetch users and aggregate earnings concurrently
+      const [dbUsers, earningsAgg] = await Promise.all([
+        prisma.user.findMany({
+          orderBy: { createdAt: "desc" },
+          include: {
+            telegramConfig: {
+              select: {
+                telegramUserId: true,
+                telegramUsername: true,
+                targetChannelName: true,
+                targetChannelId: true,
+                isActive: true,
+              },
+            },
+            payoutAccount: {
+              select: {
+                method: true,
+                upiId: true,
+                accountHolder: true,
+              },
+            },
+            _count: {
+              select: {
+                clicks: true,
+                ledger: true,
+              },
             },
           },
-          payoutAccount: {
-            select: {
-              method: true,
-              upiId: true,
-              accountHolder: true,
-            },
+        }),
+        prisma.earningsLedger.groupBy({
+          by: ["userId"],
+          where: {
+            status: { in: ["CONFIRMED", "PAID"] },
           },
-          _count: {
-            select: {
-              clicks: true,
-              ledger: true,
-            },
+          _sum: {
+            userAmountPaise: true,
           },
-        },
-      });
-
-      // 2. Aggregate confirmed & paid earnings per user
-      const earningsAgg = await prisma.earningsLedger.groupBy({
-        by: ["userId"],
-        where: {
-          status: { in: ["CONFIRMED", "PAID"] },
-        },
-        _sum: {
-          userAmountPaise: true,
-        },
-      });
+        }),
+      ]);
 
       const earningsMap = new Map<string, number>();
       for (const row of earningsAgg) {
@@ -118,7 +118,20 @@ export async function GET() {
         };
       });
 
-      return NextResponse.json({ users });
+      const totalUsers = users.length;
+      const activeUsers = users.filter((u) => !u.isSuspended).length;
+      const suspendedUsers = users.filter((u) => u.isSuspended).length;
+      const telegramConnected = users.filter((u) => u.telegramConfig?.connected).length;
+
+      return NextResponse.json({
+        users,
+        stats: {
+          totalUsers,
+          activeUsers,
+          suspendedUsers,
+          telegramConnected,
+        },
+      });
     } catch (err: any) {
       console.warn("Database error in /admin/api/users, using memory fallback:", err?.message || err);
     }
@@ -171,7 +184,20 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ users });
+  const totalUsers = users.length;
+  const activeUsers = users.filter((u) => !u.isSuspended).length;
+  const suspendedUsers = users.filter((u) => u.isSuspended).length;
+  const telegramConnected = users.filter((u) => u.telegramConfig?.connected).length;
+
+  return NextResponse.json({
+    users,
+    stats: {
+      totalUsers,
+      activeUsers,
+      suspendedUsers,
+      telegramConnected,
+    },
+  });
 }
 
 export async function POST(req: Request) {

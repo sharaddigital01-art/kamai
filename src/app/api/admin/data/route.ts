@@ -48,10 +48,21 @@ export async function GET() {
 
   if (isDatabaseConfigured()) {
     try {
-      // 1. Stores
-      const dbStores = await prisma.partnerStore.findMany({
-        orderBy: { sortOrder: "asc" },
-      });
+      // 1. Fetch Stores, Deals, and Withdrawals concurrently
+      const [dbStores, dbDeals, dbWithdrawals] = await Promise.all([
+        prisma.partnerStore.findMany({
+          orderBy: { sortOrder: "asc" },
+        }),
+        prisma.deal.findMany({
+          include: { store: { select: { slug: true, name: true, brandColor: true } } },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.withdrawal.findMany({
+          include: { user: { select: { name: true, email: true } } },
+          orderBy: { requestedAt: "desc" },
+        }),
+      ]);
+
       if (dbStores.length > 0) {
         stores = dbStores.map((s) => ({
           id: s.id,
@@ -67,11 +78,6 @@ export async function GET() {
         }));
       }
 
-      // 2. Deals
-      const dbDeals = await prisma.deal.findMany({
-        include: { store: { select: { slug: true, name: true, brandColor: true } } },
-        orderBy: { createdAt: "desc" },
-      });
       if (dbDeals.length > 0) {
         deals = dbDeals.map((d) => ({
           id: d.id,
@@ -81,11 +87,16 @@ export async function GET() {
           category: d.category,
           pricePaise: d.pricePaise,
           mrpPaise: d.mrpPaise,
+          price: d.pricePaise ? d.pricePaise / 100 : 0,
+          mrp: d.mrpPaise ? d.mrpPaise / 100 : 0,
+          storeSlug: d.store?.slug || "flipkart",
           discountPct: d.discountPct,
           estimatedProfitPaise: d.estimatedProfitPaise,
           productUrl: d.productUrl,
+          destinationUrl: d.productUrl,
           imageUrl: d.imageUrl,
           tags: d.tags,
+          offerTag: Array.isArray(d.tags) && d.tags[0] ? d.tags[0] : null,
           isFeatured: d.isFeatured,
           isActive: d.isActive,
           clickCount: d.clickCount,
@@ -95,12 +106,6 @@ export async function GET() {
           store: d.store,
         }));
       }
-
-      // 3. Withdrawals
-      const dbWithdrawals = await prisma.withdrawal.findMany({
-        include: { user: { select: { name: true, email: true } } },
-        orderBy: { requestedAt: "desc" },
-      });
       withdrawals = dbWithdrawals.map((w) => ({
         id: w.id,
         userId: w.userId,

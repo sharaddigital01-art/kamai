@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApiUser, isAdminUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { addOrUpdateMockStore, getLiveStores, isDatabaseConfigured } from "@/lib/mockData";
+import { addOrUpdateMockStore, deleteMockStore, getLiveStores, isDatabaseConfigured } from "@/lib/mockData";
 
 export const runtime = "nodejs";
 
@@ -80,5 +80,40 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "Failed to update store" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const user = await getApiUser().catch(() => null);
+    if (!isAdminUser(user)) {
+      return NextResponse.json({ error: "Access denied. Admin authorization required." }, { status: 403 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const slug = searchParams.get("slug");
+    const id = searchParams.get("id");
+    if (!slug && !id) {
+      return NextResponse.json({ error: "Store slug or ID is required" }, { status: 400 });
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        if (id) {
+          await prisma.partnerStore.delete({ where: { id } });
+        } else if (slug) {
+          await prisma.partnerStore.delete({ where: { slug } });
+        }
+      } catch (dbErr) {
+        console.warn("DB store delete notice:", dbErr);
+      }
+    }
+
+    const targetKey = slug || id || "";
+    deleteMockStore(targetKey);
+
+    return NextResponse.json({ success: true, stores: getLiveStores() });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || "Failed to delete store" }, { status: 500 });
   }
 }
