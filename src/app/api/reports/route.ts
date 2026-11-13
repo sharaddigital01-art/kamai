@@ -528,45 +528,55 @@ async function handleReports(req: Request) {
           { label: "8 AM", startHour: 8, endHour: 12 },
           { label: "12 PM", startHour: 12, endHour: 16 },
           { label: "4 PM", startHour: 16, endHour: 20 },
-          { label: "8 PM", startHour: 20, endHour: 24 },
-          { label: "Now", startHour: 0, endHour: 24 },
+          { label: "8 PM", startHour: 20, endHour: 22 },
+          { label: "Now", startHour: 22, endHour: 24 },
         ];
         const todayDateStr = now.toISOString().slice(0, 10);
 
         for (let bIdx = 0; bIdx < hourBuckets.length; bIdx++) {
           const bucket = hourBuckets[bIdx]!;
-          if (bIdx === hourBuckets.length - 1) {
-            // "Now" cumulative/summary point
-            dailyStats.push({
-              date: todayDateStr,
-              label: bucket.label,
-              clicks: totalClicks,
-              profitPaise: periodProfitPaise,
-              orders: totalTxns,
-            });
-          } else {
-            const bClicks = recentClicks.filter((c) => {
-              const h = c.createdAt.getHours();
-              return h >= bucket.startHour && h < bucket.endHour;
-            }).length;
-            const bConvs = filteredConversions.filter((c) => {
-              const h = c.createdAt.getHours();
-              return h >= bucket.startHour && h < bucket.endHour;
-            });
-            const bProfit = bConvs
-              .filter((c) => {
-                const st = String(c.status || "").toLowerCase();
-                return st === "paid" || st === "confirmed" || st === "approved";
-              })
-              .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
-            dailyStats.push({
-              date: todayDateStr,
-              label: bucket.label,
-              clicks: bClicks,
-              profitPaise: bProfit,
-              orders: bConvs.length,
-            });
+          const bClicks = recentClicks.filter((c) => {
+            const h = new Date(c.createdAt).getHours();
+            return h >= bucket.startHour && h < bucket.endHour;
+          }).length;
+
+          const seenBucketKeys = new Set<string>();
+          let bProfit = 0;
+          let bOrders = 0;
+
+          for (const r of filteredLedgerRows) {
+            const st = String(r.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            const h = new Date(r.createdAt).getHours();
+            if (h >= bucket.startHour && h < bucket.endHour) {
+              const key = String(r.externalOrderId || r.id || "").trim();
+              if (key) seenBucketKeys.add(key);
+              bProfit += safePaise(r.userAmountPaise);
+              bOrders++;
+            }
           }
+
+          for (const c of filteredConversions) {
+            const st = String(c.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            const h = new Date(c.createdAt).getHours();
+            if (h >= bucket.startHour && h < bucket.endHour) {
+              const key = String(c.transactionId || c.id || "").trim();
+              if (!key || !seenBucketKeys.has(key)) {
+                if (key) seenBucketKeys.add(key);
+                bProfit += safeCommissionPaise(c.commission);
+                bOrders++;
+              }
+            }
+          }
+
+          dailyStats.push({
+            date: todayDateStr,
+            label: bucket.label,
+            clicks: bClicks,
+            profitPaise: bProfit,
+            orders: bOrders,
+          });
         }
       } else if (queryRange === "yesterday") {
         const hourBuckets = [
@@ -575,8 +585,8 @@ async function handleReports(req: Request) {
           { label: "8 AM", startHour: 8, endHour: 12 },
           { label: "12 PM", startHour: 12, endHour: 16 },
           { label: "4 PM", startHour: 16, endHour: 20 },
-          { label: "8 PM", startHour: 20, endHour: 24 },
-          { label: "11:59 PM", startHour: 0, endHour: 24 },
+          { label: "8 PM", startHour: 20, endHour: 22 },
+          { label: "11:59 PM", startHour: 22, endHour: 24 },
         ];
         const yDate = new Date(
           now.getFullYear(),
@@ -587,37 +597,48 @@ async function handleReports(req: Request) {
 
         for (let bIdx = 0; bIdx < hourBuckets.length; bIdx++) {
           const bucket = hourBuckets[bIdx]!;
-          if (bIdx === hourBuckets.length - 1) {
-            dailyStats.push({
-              date: yDateStr,
-              label: bucket.label,
-              clicks: totalClicks,
-              profitPaise: periodProfitPaise,
-              orders: totalTxns,
-            });
-          } else {
-            const bClicks = recentClicks.filter((c) => {
-              const h = c.createdAt.getHours();
-              return h >= bucket.startHour && h < bucket.endHour;
-            }).length;
-            const bConvs = filteredConversions.filter((c) => {
-              const h = c.createdAt.getHours();
-              return h >= bucket.startHour && h < bucket.endHour;
-            });
-            const bProfit = bConvs
-              .filter((c) => {
-                const st = String(c.status || "").toLowerCase();
-                return st === "paid" || st === "confirmed" || st === "approved";
-              })
-              .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
-            dailyStats.push({
-              date: yDateStr,
-              label: bucket.label,
-              clicks: bClicks,
-              profitPaise: bProfit,
-              orders: bConvs.length,
-            });
+          const bClicks = recentClicks.filter((c) => {
+            const h = new Date(c.createdAt).getHours();
+            return h >= bucket.startHour && h < bucket.endHour;
+          }).length;
+
+          const seenBucketKeys = new Set<string>();
+          let bProfit = 0;
+          let bOrders = 0;
+
+          for (const r of filteredLedgerRows) {
+            const st = String(r.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            const h = new Date(r.createdAt).getHours();
+            if (h >= bucket.startHour && h < bucket.endHour) {
+              const key = String(r.externalOrderId || r.id || "").trim();
+              if (key) seenBucketKeys.add(key);
+              bProfit += safePaise(r.userAmountPaise);
+              bOrders++;
+            }
           }
+
+          for (const c of filteredConversions) {
+            const st = String(c.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            const h = new Date(c.createdAt).getHours();
+            if (h >= bucket.startHour && h < bucket.endHour) {
+              const key = String(c.transactionId || c.id || "").trim();
+              if (!key || !seenBucketKeys.has(key)) {
+                if (key) seenBucketKeys.add(key);
+                bProfit += safeCommissionPaise(c.commission);
+                bOrders++;
+              }
+            }
+          }
+
+          dailyStats.push({
+            date: yDateStr,
+            label: bucket.label,
+            clicks: bClicks,
+            profitPaise: bProfit,
+            orders: bOrders,
+          });
         }
       } else if (queryRange === "30d") {
         const daySteps = [29, 24, 19, 14, 9, 4, 0];
@@ -635,23 +656,40 @@ async function handleReports(req: Request) {
             (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
           ).length;
 
-          const dayConversions = filteredConversions.filter(
-            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
-          );
+          const seenDayKeys = new Set<string>();
+          let dayProfit = 0;
+          let dayOrders = 0;
 
-          const dayProfit = dayConversions
-            .filter((c) => {
-              const st = String(c.status || "").toLowerCase();
-              return st === "paid" || st === "confirmed" || st === "approved";
-            })
-            .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+          for (const r of filteredLedgerRows) {
+            const st = String(r.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            if (r.createdAt && new Date(r.createdAt).toISOString().slice(0, 10) === dateStr) {
+              const key = String(r.externalOrderId || r.id || "").trim();
+              if (key) seenDayKeys.add(key);
+              dayProfit += safePaise(r.userAmountPaise);
+              dayOrders++;
+            }
+          }
+
+          for (const c of filteredConversions) {
+            const st = String(c.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            if (c.createdAt && new Date(c.createdAt).toISOString().slice(0, 10) === dateStr) {
+              const key = String(c.transactionId || c.id || "").trim();
+              if (!key || !seenDayKeys.has(key)) {
+                if (key) seenDayKeys.add(key);
+                dayProfit += safeCommissionPaise(c.commission);
+                dayOrders++;
+              }
+            }
+          }
 
           dailyStats.push({
             date: dateStr,
             label: dayLabel,
             clicks: dayClicks,
             profitPaise: dayProfit,
-            orders: dayConversions.length,
+            orders: dayOrders,
           });
         }
       } else {
@@ -672,39 +710,41 @@ async function handleReports(req: Request) {
             (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
           ).length;
 
-          const dayConversions = filteredConversions.filter(
-            (c) => c.createdAt.toISOString().slice(0, 10) === dateStr
-          );
+          const seenDayKeys = new Set<string>();
+          let dayProfitPaise = 0;
+          let dayOrders = 0;
 
-          const dayProfitPaise = dayConversions
-            .filter((c) => {
-              const st = String(c.status || "").toLowerCase();
-              return st === "paid" || st === "confirmed" || st === "approved";
-            })
-            .reduce((sum, c) => sum + Math.round(c.commission * 100), 0);
+          for (const r of filteredLedgerRows) {
+            const st = String(r.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            if (r.createdAt && new Date(r.createdAt).toISOString().slice(0, 10) === dateStr) {
+              const key = String(r.externalOrderId || r.id || "").trim();
+              if (key) seenDayKeys.add(key);
+              dayProfitPaise += safePaise(r.userAmountPaise);
+              dayOrders++;
+            }
+          }
+
+          for (const c of filteredConversions) {
+            const st = String(c.status || "").toLowerCase();
+            if (st === "rejected" || st === "cancelled" || st === "failed") continue;
+            if (c.createdAt && new Date(c.createdAt).toISOString().slice(0, 10) === dateStr) {
+              const key = String(c.transactionId || c.id || "").trim();
+              if (!key || !seenDayKeys.has(key)) {
+                if (key) seenDayKeys.add(key);
+                dayProfitPaise += safeCommissionPaise(c.commission);
+                dayOrders++;
+              }
+            }
+          }
 
           dailyStats.push({
             date: dateStr,
             label: dayLabel,
             clicks: dayClicks,
             profitPaise: dayProfitPaise,
-            orders: dayConversions.length,
+            orders: dayOrders,
           });
-        }
-      }
-
-      // If curve is all zero but period has total metrics, ensure the last point reflects the total
-      const lastStat = dailyStats[dailyStats.length - 1];
-      if (lastStat) {
-        if (dailyStats.every((d) => d.clicks === 0) && totalClicks > 0) {
-          lastStat.clicks = totalClicks;
-        }
-        if (
-          dailyStats.every((d) => d.profitPaise === 0) &&
-          periodProfitPaise > 0
-        ) {
-          lastStat.profitPaise = periodProfitPaise;
-          lastStat.orders = totalTxns;
         }
       }
       dbSuccess = true;
@@ -792,7 +832,7 @@ async function handleReports(req: Request) {
 
     totalTxns = fallbackTxns;
     periodProfitPaise =
-      queryRange === "all" ? balances.lifetime : fallbackProfit;
+      queryRange === "all" ? balances.lifetime : (fallbackProfit ?? 0);
 
     const labels =
       queryRange === "today"
@@ -804,13 +844,12 @@ async function handleReports(req: Request) {
         : ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"];
 
     for (let i = 0; i < labels.length; i++) {
-      const isLast = i === labels.length - 1;
       dailyStats.push({
         date: "",
         label: labels[i]!,
-        clicks: isLast ? totalClicks : 0,
-        profitPaise: isLast ? periodProfitPaise : 0,
-        orders: isLast ? totalTxns : 0,
+        clicks: 0,
+        profitPaise: 0,
+        orders: 0,
       });
     }
   }

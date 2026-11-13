@@ -393,17 +393,7 @@ export default function ReportsPage() {
   const points =
     dailyStats.length > 0
       ? dailyStats.map((d) => d.clicks)
-      : baseClicks === 0 && baseOrders === 0
-      ? Array(labels.length).fill(0)
-      : [
-          Math.max(0, Math.round(baseClicks * 0.1)),
-          Math.max(0, Math.round(baseClicks * 0.2)),
-          Math.max(0, Math.round(baseClicks * 0.15)),
-          Math.max(0, Math.round(baseClicks * 0.4)),
-          Math.max(0, Math.round(baseClicks * 0.35)),
-          Math.max(0, Math.round(baseClicks * 0.6)),
-          baseClicks,
-        ];
+      : Array(labels.length).fill(0);
 
   // SVG coordinates
   const width = 360;
@@ -533,10 +523,12 @@ export default function ReportsPage() {
   const displayProfitPaise =
     totalBrandProfit > 0
       ? totalBrandProfit
-      : safePaise(stats.totalProfitPaise) || safePaise(balances.lifetime) || 0;
+      : period === "all"
+      ? safePaise(stats.totalProfitPaise) || safePaise(balances.lifetime) || 0
+      : safePaise(stats.totalProfitPaise) ?? 0;
 
   const displayOrdersCount =
-    totalBrandTxns > 0 ? totalBrandTxns : stats.totalTransactions;
+    totalBrandTxns > 0 ? totalBrandTxns : (stats.totalTransactions ?? 0);
 
   const brandRows =
     brandStatsMap.size > 0
@@ -1049,7 +1041,7 @@ export default function ReportsPage() {
               <tr className="bg-emerald-50/50 font-black text-ink border-t border-black/10">
                 <td className="py-3 px-4 uppercase text-[11px]">Total</td>
                 <td className="py-3 px-2 text-center">
-                  {totalBrandTxns}
+                  {displayOrdersCount}
                 </td>
                 <td className="num py-3 px-3 text-right text-[#169443]">
                   {formatINR(displayProfitPaise)}

@@ -32,22 +32,22 @@ export function EarnKaroFooter() {
           <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2.5">
             <Award className="h-5 w-5 text-[#22c55e] shrink-0" />
             <div>
-              <p className="font-bold text-white text-[11px]">Backed by Top Investors</p>
-              <p className="text-[10px] text-white/60">Ratan Tata & Kalaari</p>
+              <p className="font-bold text-white text-[11px]">Verified Partner Network</p>
+              <p className="text-[10px] text-white/60">Amazon & Cuelinks Approved</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2.5">
             <ShieldCheck className="h-5 w-5 text-[#22c55e] shrink-0" />
             <div>
               <p className="font-bold text-white text-[11px]">Direct Bank Transfer</p>
-              <p className="text-[10px] text-white/60">NEFT / UPI Payouts</p>
+              <p className="text-[10px] text-white/60">Instant UPI & NEFT</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2.5">
             <Smartphone className="h-5 w-5 text-[#22c55e] shrink-0" />
             <div>
-              <p className="font-bold text-white text-[11px]">10M+ App Downloads</p>
-              <p className="text-[10px] text-white/60">Rated 4.5★ Play Store</p>
+              <p className="font-bold text-white text-[11px]">Automated Deal Bots</p>
+              <p className="text-[10px] text-white/60">Telegram & WhatsApp Sync</p>
             </div>
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/5 p-2.5">
@@ -55,8 +55,8 @@ export function EarnKaroFooter() {
               ₹
             </div>
             <div>
-              <p className="font-bold text-white text-[11px]">₹150+ Crore Paid</p>
-              <p className="text-[10px] text-white/60">To 30L+ Earners</p>
+              <p className="font-bold text-white text-[11px]">Transparent Earnings</p>
+              <p className="text-[10px] text-white/60">Up to 70% Profit Share</p>
             </div>
           </div>
         </div>
@@ -163,7 +163,7 @@ export function EarnKaroFooter() {
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 rounded-full bg-[#0088cc]/20 text-[#00aaff] px-3 py-1.5 font-semibold hover:bg-[#0088cc]/30 transition"
                   >
-                    <Send className="h-3.5 w-3.5" /> Telegram (200k+)
+                    <Send className="h-3.5 w-3.5" /> Telegram Channel
                   </a>
                   <a
                     href="https://instagram.com"

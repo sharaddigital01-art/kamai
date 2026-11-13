@@ -80,14 +80,11 @@ export async function GET() {
         }),
       ]);
 
-      // Aggregate real clicks from Prisma clicks table, shortlinks, and generated links
+      // Aggregate real clicks from Prisma clicks table, shortlinks, and generated links without double counting
       const aggregatedLinkClicks =
         (shortLinkAgg._sum.clickCount || 0) + (genLinkAgg._sum.clickCount || 0);
       const totalClicks = Math.max(totalClicksCount, aggregatedLinkClicks);
-      const clicksToday = Math.max(
-        clicksTodayCount,
-        totalClicks > 0 ? Math.min(totalClicks, 15) : 0
-      );
+      const clicksToday = clicksTodayCount;
 
       let lifetimeGrossPaise = 0;
       let totalUserPaiseFromLedger = 0;
@@ -102,18 +99,19 @@ export async function GET() {
         const adminCut = Math.round(gross * 0.30);
         const st = String(row.status || "").toUpperCase();
 
-        lifetimeGrossPaise += gross;
-        if (st !== "REJECTED" && st !== "CANCELLED" && st !== "FAILED") {
-          totalUserPaiseFromLedger += userAmt;
+        if (st === "REJECTED" || st === "CANCELLED" || st === "FAILED") {
+          rejectedCutPaise += adminCut;
+          continue;
         }
+
+        lifetimeGrossPaise += gross;
+        totalUserPaiseFromLedger += userAmt;
 
         if (st === "CONFIRMED" || st === "PAID") {
           approvedCutPaise += adminCut;
           approvedUserProfitPaise += userAmt;
         } else if (st === "PENDING") {
           pendingCutPaise += adminCut;
-        } else if (st === "REJECTED") {
-          rejectedCutPaise += adminCut;
         }
       }
 
@@ -130,17 +128,18 @@ export async function GET() {
         const adminCut = Math.round(gross * 0.30);
         const st = String(c.status || "").toLowerCase();
 
-        convGrossPaise += gross;
-        if (st !== "rejected" && st !== "cancelled" && st !== "failed") {
-          convTotalUserPaise += userAmt;
+        if (st === "rejected" || st === "cancelled" || st === "failed") {
+          convRejectedCutPaise += adminCut;
+          continue;
         }
+
+        convGrossPaise += gross;
+        convTotalUserPaise += userAmt;
 
         if (st === "approved" || st === "confirmed" || st === "paid") {
           convApprovedCutPaise += adminCut;
         } else if (st === "pending" || st === "open" || st === "processing") {
           convPendingCutPaise += adminCut;
-        } else if (st === "rejected" || st === "cancelled" || st === "failed") {
-          convRejectedCutPaise += adminCut;
         }
       }
 
@@ -153,7 +152,7 @@ export async function GET() {
         rejectedCutPaise = convRejectedCutPaise;
       }
 
-      // Dynamically calculate user profit (70%): ensure it reflects user payouts accurately and never ₹0 when gross > 0
+      // Dynamically calculate user profit (70%): ensure it reflects valid user payouts accurately and excludes cancelled/rejected conversions
       const expected70Pct = Math.round(lifetimeGrossPaise * 0.70);
       const distributedUserProfitPaise = Math.max(
         totalUserPaiseFromLedger,
@@ -229,8 +228,8 @@ export async function GET() {
   });
 
   return NextResponse.json({
-    clicksToday: Math.max(clicksToday, 2),
-    totalClicks: Math.max(liveClicks.length, 14),
+    clicksToday,
+    totalClicks: liveClicks.length,
     lifetimeGrossPaise: grossPaise,
     distributedUserProfitPaise: userProfitPaise,
     platformNetProfitPaise: overview.totalPlatformRevenuePaise,
