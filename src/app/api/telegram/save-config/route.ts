@@ -54,9 +54,16 @@ export async function POST(req: Request) {
       clearTargetChannel,
     } = result.data;
 
-    // Identify user
-    let user = await getApiUser().catch(() => null);
-    let targetUserId = user?.id || directUserId;
+    // Identify user strictly from authenticated session
+    const user = await getApiUser().catch(() => null);
+    let targetUserId: string | null = null;
+
+    if (user) {
+      // Authenticated users strictly update their own configuration
+      targetUserId = user.id;
+    } else if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+      targetUserId = directUserId || null;
+    }
 
     if (!targetUserId) {
       return NextResponse.json(

@@ -1,9 +1,9 @@
 /** Tiny TTL cache for the hot redirect path. Swap for Redis GET/SETEX when running >1 instance. */
 export interface CachedLink {
   id: string;
-  userId: string;
-  storeId: string;
-  dealId: string | null;
+  userId: string | null;
+  storeId?: string | null;
+  dealId?: string | null;
   destinationUrl: string;
 }
 

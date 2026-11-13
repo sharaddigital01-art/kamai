@@ -9,6 +9,7 @@ import {
   saveMockShortLink,
   getMockShortLinkBySlug,
 } from "@/lib/mockData";
+import { RESERVED_SLUGS } from "@/lib/reservedSlugs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +51,14 @@ export async function POST(req: Request) {
     } catch {
       return NextResponse.json(
         { error: "Invalid URL format. Please provide a valid web URL." },
+        { status: 400 }
+      );
+    }
+
+    // Check reserved slug names
+    if (customSlug && RESERVED_SLUGS.has(customSlug.toLowerCase().trim())) {
+      return NextResponse.json(
+        { error: `The custom slug '${customSlug}' is reserved by the system. Please choose a different slug.` },
         { status: 400 }
       );
     }

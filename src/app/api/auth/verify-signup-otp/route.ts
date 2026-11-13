@@ -10,7 +10,7 @@ import {
   findMockUserByEmail,
   getUserBalances,
 } from "@/lib/mockData";
-import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
+import { AUTH_COOKIE, isAdminEmail, signAuthPayload } from "@/lib/auth";
 import { verifyUnifiedOtp } from "@/lib/otp";
 import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createSupabaseServer } from "@/lib/supabase/server";
@@ -249,8 +249,10 @@ export async function POST(req: Request) {
           createdAt: new Date().toISOString(),
         };
 
-        cookieStore.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
-          httpOnly: false,
+        const token = await signAuthPayload(sessionPayload);
+        cookieStore.set(AUTH_COOKIE, token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
           sameSite: "lax",
           path: "/",
           maxAge: 60 * 60 * 24 * 7,

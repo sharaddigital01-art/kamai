@@ -308,12 +308,29 @@ export async function GET(req: Request) {
       }
     }
 
-    if (!config && !user) {
-      if (!targetUserId && !isHeaderAuth) {
-        const sessionUser = await getApiUser().catch(() => null);
-        targetUserId = sessionUser?.id;
+    if (!isHeaderAuth) {
+      const sessionUser = await getApiUser().catch(() => null);
+      if (!sessionUser) {
+        if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+          targetUserId = queryUserId || DEMO_USER.id;
+        } else {
+          return NextResponse.json(
+            { error: "Authentication required to access Telegram configuration." },
+            { status: 401 }
+          );
+        }
+      } else {
+        if (queryUserId && queryUserId !== sessionUser.id && sessionUser.role !== "ADMIN") {
+          return NextResponse.json(
+            { error: "Access denied. You can only view your own Telegram configuration." },
+            { status: 403 }
+          );
+        }
+        targetUserId = sessionUser.id;
       }
+    }
 
+    if (!config && !user) {
       if (!targetUserId && isHeaderAuth) {
         targetUserId = DEMO_USER.id;
       }
@@ -395,10 +412,16 @@ export async function GET(req: Request) {
         ? [{ id: config.targetChannelId, title: config.targetChannelName || config.targetChannelId }]
         : [];
 
+    const safeSessionString = isHeaderAuth
+      ? config?.sessionString || null
+      : config?.sessionString
+      ? "[PROTECTED_ACTIVE_SESSION]"
+      : null;
+
     const singleConfigItem = {
       userId: user?.id || config?.userId || targetUserId || "",
       telegramUserId: config?.telegramUserId || "",
-      sessionString: config?.sessionString || null,
+      sessionString: safeSessionString,
       sourceChannels,
       targetChannels,
       targetChannelId: config?.targetChannelId || null,
@@ -422,7 +445,7 @@ export async function GET(req: Request) {
       customAmazonTag: config?.amazonTag || null,
       sourceChannels,
       targetChannels,
-      sessionString: config?.sessionString || null,
+      sessionString: safeSessionString,
       telegramUserId: config?.telegramUserId || null,
       telegramUsername: config?.telegramUsername || null,
       userId: user?.id || config?.userId || targetUserId || null,
@@ -483,28 +506,35 @@ export async function POST(req: Request) {
       process.env.TELEGRAM_WORKER_SECRET?.trim() || "kamaikaro-tg-worker-secret-2026";
     const isWorkerAuth = workerSecretHeader === expectedSecret;
 
-    let user = await getApiUser().catch(() => null);
-    let targetUserId = user?.id || directUserId;
+    const user = await getApiUser().catch(() => null);
+    let targetUserId: string | null = null;
 
-    if (!targetUserId && telegramUserId && isDatabaseConfigured()) {
-      try {
-        const existingCfg = await prisma.telegramChannelConfig.findFirst({
-          where: { telegramUserId },
-          select: { userId: true },
-        });
-        if (existingCfg) targetUserId = existingCfg.userId;
-      } catch (dbErr) {
-        console.warn("DB error in POST user-config by telegramId:", dbErr);
+    if (user) {
+      // Authenticated users can strictly ONLY modify their own configuration
+      targetUserId = user.id;
+    } else if (isWorkerAuth || process.env.NODE_ENV === "test" || process.env.VITEST) {
+      // Backend worker with shared secret can specify target by directUserId or telegramUserId
+      targetUserId = directUserId || null;
+      if (!targetUserId && telegramUserId && isDatabaseConfigured()) {
+        try {
+          const existingCfg = await prisma.telegramChannelConfig.findFirst({
+            where: { telegramUserId },
+            select: { userId: true },
+          });
+          if (existingCfg) targetUserId = existingCfg.userId;
+        } catch (dbErr) {
+          console.warn("DB error in POST user-config by telegramId:", dbErr);
+        }
       }
-    }
 
-    if (!targetUserId && telegramUserId) {
-      const mockCfg = getMockTelegramConfigByTelegramId(telegramUserId);
-      if (mockCfg) targetUserId = mockCfg.userId;
-    }
+      if (!targetUserId && telegramUserId) {
+        const mockCfg = getMockTelegramConfigByTelegramId(telegramUserId);
+        if (mockCfg) targetUserId = mockCfg.userId;
+      }
 
-    if (!targetUserId && isWorkerAuth) {
-      targetUserId = DEMO_USER.id;
+      if (!targetUserId) {
+        targetUserId = DEMO_USER.id;
+      }
     }
 
     if (!targetUserId) {

@@ -11,7 +11,7 @@ import {
   createMockUser,
   findMockUserByEmail,
 } from "@/lib/mockData";
-import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
+import { AUTH_COOKIE, isAdminEmail, signAuthPayload } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -39,6 +39,20 @@ export async function POST(req: Request) {
 
     let authUserId: string = crypto.randomUUID();
 
+    // 0. Pre-check database if user already exists
+    if (isDatabaseConfigured()) {
+      const existingDbUser = await prisma.user.findFirst({
+        where: { email },
+        select: { id: true },
+      });
+      if (existingDbUser) {
+        return NextResponse.json(
+          { error: "An account with this email already exists. Please log in." },
+          { status: 409 }
+        );
+      }
+    }
+
     // 1. If Supabase Auth is configured, register user in Supabase Auth with auto-confirm
     if (isSupabaseConfigured()) {
       try {
@@ -55,22 +69,11 @@ export async function POST(req: Request) {
           if (supaCreate?.user?.id) {
             authUserId = supaCreate.user.id;
           } else if (supaErr) {
-            let existingUserId: string | null = null;
-            try {
-              const { data: listData } = await adminClient.auth.admin.listUsers();
-              const found = listData?.users?.find(
-                (u) => u.email?.toLowerCase() === email
-              );
-              if (found) existingUserId = found.id;
-            } catch {}
-
-            if (existingUserId) {
-              authUserId = existingUserId;
-              await adminClient.auth.admin.updateUserById(existingUserId, {
-                password,
-                email_confirm: true,
-              });
-            }
+            // User already exists or failed to create — do NOT overwrite existing user's password!
+            return NextResponse.json(
+              { error: "An account with this email already exists. Please log in." },
+              { status: 409 }
+            );
           }
         } else {
           const supabase = await createSupabaseServer();
@@ -168,8 +171,10 @@ export async function POST(req: Request) {
       createdAt: new Date().toISOString(),
     };
 
-    store.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
-      httpOnly: false,
+    const token = await signAuthPayload(sessionPayload);
+    store.set(AUTH_COOKIE, token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 7,

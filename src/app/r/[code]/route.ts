@@ -23,6 +23,7 @@ function hashIp(ip: string): string {
 
 export interface ExtendedCachedLink extends CachedLink {
   subId?: string | null;
+  isShortLink?: boolean;
 }
 
 async function resolveLink(code: string): Promise<ExtendedCachedLink | null> {
@@ -76,8 +77,11 @@ async function resolveLink(code: string): Promise<ExtendedCachedLink | null> {
       const shortRow: ExtendedCachedLink = {
         id: short.id,
         userId: short.userId,
+        storeId: null,
+        dealId: null,
         destinationUrl: short.targetUrl || short.originalUrl,
         subId: short.subId,
+        isShortLink: true,
       };
       setCachedLink(code, shortRow);
       return shortRow;
@@ -92,7 +96,7 @@ async function resolveLink(code: string): Promise<ExtendedCachedLink | null> {
 export async function GET(req: NextRequest, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
   const home = new URL("/?link=not-found", req.url);
-  if (!/^[0-9A-Za-z]{6,12}$/.test(code)) return NextResponse.redirect(home, 302);
+  if (!/^[0-9A-Za-z_-]{3,32}$/.test(code)) return NextResponse.redirect(home, 302);
 
   const link = await resolveLink(code);
   if (!link) return NextResponse.redirect(home, 302);
@@ -117,38 +121,64 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
   // Record live click row in database immediately before redirecting
   if (isDatabaseConfigured()) {
     try {
-      await prisma.$transaction([
-        prisma.click.create({
-          data: {
-            linkId: link.id,
-            userId: link.userId || undefined,
-            subId: link.subId || undefined,
-            storeId: link.storeId || undefined,
-            ipHash,
-            userAgent: ua.slice(0, 300) || null,
-            referer,
-            deviceType: devType,
-            isBot,
-            createdAt: clickedAt,
-          },
-        }),
-        ...(isBot
-          ? []
-          : [
-              prisma.generatedLink.update({
-                where: { id: link.id },
-                data: { clickCount: { increment: 1 }, lastClickedAt: clickedAt },
-              }),
-              ...(link.dealId
-                ? [
-                    prisma.deal.update({
-                      where: { id: link.dealId },
-                      data: { clickCount: { increment: 1 } },
-                    }),
-                  ]
-                : []),
-            ]),
-      ]);
+      if (link.isShortLink) {
+        await prisma.$transaction([
+          prisma.click.create({
+            data: {
+              shortLinkId: link.id,
+              userId: link.userId || undefined,
+              subId: link.subId || undefined,
+              ipHash,
+              userAgent: ua.slice(0, 300) || null,
+              referer,
+              deviceType: devType,
+              isBot,
+              createdAt: clickedAt,
+            },
+          }),
+          ...(isBot
+            ? []
+            : [
+                prisma.shortLink.update({
+                  where: { id: link.id },
+                  data: { clickCount: { increment: 1 } },
+                }),
+              ]),
+        ]);
+      } else {
+        await prisma.$transaction([
+          prisma.click.create({
+            data: {
+              linkId: link.id,
+              userId: link.userId || undefined,
+              subId: link.subId || undefined,
+              storeId: link.storeId || undefined,
+              ipHash,
+              userAgent: ua.slice(0, 300) || null,
+              referer,
+              deviceType: devType,
+              isBot,
+              createdAt: clickedAt,
+            },
+          }),
+          ...(isBot
+            ? []
+            : [
+                prisma.generatedLink.update({
+                  where: { id: link.id },
+                  data: { clickCount: { increment: 1 }, lastClickedAt: clickedAt },
+                }),
+                ...(link.dealId
+                  ? [
+                      prisma.deal.update({
+                        where: { id: link.dealId },
+                        data: { clickCount: { increment: 1 } },
+                      }),
+                    ]
+                  : []),
+              ]),
+        ]);
+      }
     } catch (e) {
       console.warn("Live click tracking failed in /r/[code]:", e);
     }

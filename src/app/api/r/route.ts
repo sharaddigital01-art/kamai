@@ -84,53 +84,39 @@ async function handleRedirect(req: NextRequest) {
   const ipHash = hashIp(ip);
   const devType = deviceType(ua);
 
-  // Asynchronous background click logging (non-blocking)
-  const logClickPromise = (async () => {
-    try {
-      let resolvedUserId: string | null = null;
-      if (cleanSub) {
-        resolvedUserId = await resolveUserBySubId(cleanSub).catch(() => null);
-      }
-
-      if (isDatabaseConfigured()) {
-        try {
-          await prisma.click.create({
-            data: {
-              userId: resolvedUserId || undefined,
-              subId: cleanSub || undefined,
-              ipHash,
-              userAgent: ua.slice(0, 300) || null,
-              referer,
-              deviceType: devType,
-              isBot,
-              createdAt: clickedAt,
-            },
-          });
-        } catch (dbErr) {
-          console.warn("Async prisma.click.create error in /api/r:", dbErr);
-        }
-      }
-
-      // Record in mock tracking store for instant in-memory reporting
-      recordMockClick(resolvedUserId, cleanSub, targetUrl);
-    } catch (err) {
-      console.warn("Async click logging error in /api/r:", err);
-    }
-  })();
-
-  // Keep background task alive in serverless/edge environments
+  // Reliable serverless click logging before redirect (zero dropped clicks)
   try {
-    if (typeof after === "function") {
-      after(logClickPromise);
-    } else {
-      logClickPromise.catch(() => {});
+    let resolvedUserId: string | null = null;
+    if (cleanSub) {
+      resolvedUserId = await resolveUserBySubId(cleanSub).catch(() => null);
     }
-  } catch {
-    // In test runners or non-Next.js request scope contexts, after() throws
-    logClickPromise.catch(() => {});
+
+    if (isDatabaseConfigured()) {
+      try {
+        await prisma.click.create({
+          data: {
+            userId: resolvedUserId || undefined,
+            subId: cleanSub || undefined,
+            ipHash,
+            userAgent: ua.slice(0, 300) || null,
+            referer,
+            deviceType: devType,
+            isBot,
+            createdAt: clickedAt,
+          },
+        });
+      } catch (dbErr) {
+        console.warn("Prisma.click.create error in /api/r:", dbErr);
+      }
+    }
+
+    // Record in mock tracking store for instant in-memory reporting
+    recordMockClick(resolvedUserId, cleanSub, targetUrl);
+  } catch (err) {
+    console.warn("Click logging error in /api/r:", err);
   }
 
-  // Return HTTP 302 redirect immediately without blocking
+  // Return HTTP 302 redirect
   return NextResponse.redirect(targetUrl, {
     status: 302,
     headers: {

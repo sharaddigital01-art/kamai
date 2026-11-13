@@ -13,7 +13,7 @@ import {
   findMockUserByPhone,
   createMockUser,
 } from "@/lib/mockData";
-import { AUTH_COOKIE, isAdminEmail } from "@/lib/auth";
+import { AUTH_COOKIE, isAdminEmail, signAuthPayload } from "@/lib/auth";
 import { normalizeIdentifier, verifyLoginOtp } from "@/lib/otp";
 
 export const runtime = "nodejs";
@@ -307,41 +307,6 @@ export async function POST(req: Request) {
           }
         }
 
-        // 4. Resilience for users registered via OTP whose password wasn't yet set in Supabase Auth
-        if (authError && authError.message.toLowerCase().includes("invalid login credentials")) {
-          const adminClient = getSupabaseAdmin();
-          if (adminClient) {
-            try {
-              let existingSupaId: string | null = null;
-              const { data: listData } = await adminClient.auth.admin.listUsers();
-              const found = listData?.users?.find(
-                (u) => u.email?.toLowerCase() === targetEmail
-              );
-              if (found) existingSupaId = found.id;
-
-              if (existingSupaId) {
-                // Permanently commit password & email confirmation in Supabase Auth
-                await adminClient.auth.admin.updateUserById(existingSupaId, {
-                  password,
-                  email_confirm: true,
-                });
-
-                // Retry signInWithPassword now that password is saved
-                const retryRes = await supabase.auth.signInWithPassword({
-                  email: targetEmail,
-                  password,
-                });
-                if (retryRes.data?.user) {
-                  authData = retryRes.data;
-                  authError = null;
-                }
-              }
-            } catch (syncErr: any) {
-              console.warn("Supabase admin password sync notice in login:", syncErr?.message || syncErr);
-            }
-          }
-        }
-
         if (authError) {
           // If Supabase throws rate limit or invalid credentials, return clear message
           if (authError.status === 429) {
@@ -350,9 +315,10 @@ export async function POST(req: Request) {
               { status: 429 }
             );
           }
-          if (!isAdmin && isDatabaseConfigured()) {
-            return NextResponse.json({ error: authError.message }, { status: 401 });
-          }
+          return NextResponse.json(
+            { error: authError.message || "Invalid login credentials. Please check your email and password." },
+            { status: 401 }
+          );
         }
 
         if (authData?.user) {
@@ -462,8 +428,10 @@ export async function POST(req: Request) {
         createdAt: user.createdAt || new Date().toISOString(),
       };
 
-      store.set(AUTH_COOKIE, encodeURIComponent(JSON.stringify(sessionPayload)), {
-        httpOnly: false,
+      const token = await signAuthPayload(sessionPayload);
+      store.set(AUTH_COOKIE, token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         path: "/",
         maxAge: 60 * 60 * 24 * 7,

@@ -15,25 +15,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** Routes and static assets that should never be treated as short slugs */
-const RESERVED_SLUGS = new Set([
-  "admin",
-  "api",
-  "earnings",
-  "links",
-  "login",
-  "make-links",
-  "partners",
-  "profile",
-  "r",
-  "reports",
-  "signup",
-  "telegram-bot",
-  "favicon.ico",
-  "robots.txt",
-  "sitemap.xml",
-  "_next",
-]);
+import { RESERVED_SLUGS } from "@/lib/reservedSlugs";
 
 const BOT_RE =
   /bot|crawl|spider|slurp|preview|facebookexternalhit|whatsapp|telegram|curl|wget|python-requests|headless/i;

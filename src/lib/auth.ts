@@ -12,9 +12,11 @@ import {
   findMockUserByEmail,
   createMockUser,
 } from "./mockData";
+import { verifyAuthPayload, signAuthPayload } from "./session";
 
 export const REF_COOKIE = "kamai_ref";
 export const AUTH_COOKIE = "kamai_auth_user";
+export { signAuthPayload, verifyAuthPayload };
 
 export function getAdminEmails(): string[] {
   const envEmails = process.env.ADMIN_EMAILS || "admin@earnkaro.com,admin@earnkaro.local,admin@gmail.com";
@@ -55,25 +57,76 @@ export const getAuthUser = cache(async () => {
     }
   }
 
-  // 2. Check application auth session cookie (set during email/password login)
+  // 2. Check application auth session cookie (signed with HMAC)
   const sessionCookie = store.get(AUTH_COOKIE)?.value;
   if (sessionCookie) {
-    try {
-      const parsed = JSON.parse(decodeURIComponent(sessionCookie));
-      if (parsed?.id) {
+    const verified = await verifyAuthPayload(sessionCookie);
+    if (verified?.payload?.id) {
+      const p = verified.payload;
+
+      // For signed tokens, trust the payload directly
+      if (verified.isSigned) {
         return {
-          id: parsed.id,
-          email: parsed.email || null,
-          phone: parsed.phone || null,
-          user_metadata: { name: parsed.name || parsed.email?.split("@")[0] || "Kamai Karo Partner" },
-          referralCode: parsed.referralCode,
-          subIdPrefix: parsed.subIdPrefix,
+          id: p.id,
+          email: p.email || null,
+          phone: p.phone || null,
+          user_metadata: { name: p.name || p.email?.split("@")[0] || "Kamai Karo Partner" },
+          referralCode: p.referralCode,
+          subIdPrefix: p.subIdPrefix,
+          role: p.role || "USER",
           aud: "authenticated",
-          created_at: parsed.createdAt || new Date().toISOString(),
+          created_at: p.createdAt || new Date().toISOString(),
         } as any;
       }
-    } catch {
-      // invalid cookie format
+
+      // For legacy unsigned cookies, verify user strictly exists in DB to prevent spoofing
+      if (isDatabaseConfigured()) {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: p.id },
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+              name: true,
+              role: true,
+              referralCode: true,
+              subIdPrefix: true,
+              createdAt: true,
+            },
+          });
+          if (dbUser && (!p.email || dbUser.email?.toLowerCase() === p.email.toLowerCase())) {
+            return {
+              id: dbUser.id,
+              email: dbUser.email || null,
+              phone: dbUser.phone || null,
+              user_metadata: { name: dbUser.name || "Kamai Karo Partner" },
+              referralCode: dbUser.referralCode,
+              subIdPrefix: dbUser.subIdPrefix,
+              role: dbUser.role,
+              aud: "authenticated",
+              created_at: dbUser.createdAt.toISOString(),
+            } as any;
+          }
+        } catch {
+          // DB error
+        }
+      } else {
+        const mockU = findMockUserByEmail(p.email || "");
+        if (mockU && mockU.id === p.id) {
+          return {
+            id: mockU.id,
+            email: mockU.email,
+            phone: null,
+            user_metadata: { name: mockU.name },
+            referralCode: mockU.referralCode,
+            subIdPrefix: mockU.subIdPrefix,
+            role: mockU.role,
+            aud: "authenticated",
+            created_at: mockU.createdAt,
+          } as any;
+        }
+      }
     }
   }
 

@@ -1,11 +1,11 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { verifyAuthPayload } from "@/lib/session";
 
 const PROTECTED = ["/earnings", "/links"];
 const AUTH_COOKIE = "kamai_auth_user";
 
-function isAuthorizedAdmin(email?: string | null, role?: string | null): boolean {
-  if (role === "ADMIN") return true;
+function isAuthorizedAdmin(email?: string | null): boolean {
   if (!email) return false;
   const envEmails = process.env.ADMIN_EMAILS || "admin@earnkaro.com,admin@earnkaro.local,admin@gmail.com";
   const list = envEmails
@@ -13,7 +13,7 @@ function isAuthorizedAdmin(email?: string | null, role?: string | null): boolean
     .split(",")
     .map((e) => e.trim())
     .filter(Boolean);
-  return list.includes(email.toLowerCase());
+  return list.includes(email.toLowerCase().trim());
 }
 
 export async function middleware(request: NextRequest) {
@@ -26,15 +26,12 @@ export async function middleware(request: NextRequest) {
     response.cookies.set("kamai_ref", ref, { maxAge: 60 * 60 * 24 * 30, sameSite: "lax", path: "/" });
   }
 
-  // 2. Check session from application cookie
-  let sessionUser: { id?: string; email?: string; role?: string } | null = null;
+  // 2. Check session from application cookie (HMAC verified)
+  let sessionUser: { id?: string; email?: string | null; role?: string } | null = null;
   const authCookie = request.cookies.get(AUTH_COOKIE)?.value;
-  if (authCookie) {
-    try {
-      sessionUser = JSON.parse(decodeURIComponent(authCookie));
-    } catch {
-      // invalid cookie
-    }
+  const verifiedSession = await verifyAuthPayload(authCookie);
+  if (verifiedSession?.payload) {
+    sessionUser = verifiedSession.payload;
   }
 
   // 3. Supabase Auth cookie refresh & check
@@ -71,19 +68,35 @@ export async function middleware(request: NextRequest) {
 
   const currentUser = sessionUser || supabaseUser;
 
-  // 4. Protection for /admin route
-  if (pathname.startsWith("/admin")) {
-    // If not logged in at all, redirect to login with next=/admin
+  // 4. Protection for /admin and /api/admin routes
+  const isAdminPage = pathname.startsWith("/admin");
+  const isAdminApi = pathname.startsWith("/api/admin");
+
+  if (isAdminPage || isAdminApi) {
     if (!currentUser) {
+      if (isAdminApi) {
+        return NextResponse.json(
+          { error: "Authentication required." },
+          { status: 401 }
+        );
+      }
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
-      loginUrl.search = "?next=/admin";
+      loginUrl.search = `?next=${encodeURIComponent(pathname)}`;
       return NextResponse.redirect(loginUrl);
     }
 
-    // Check if user is an authorized admin
-    const isAdmin = isAuthorizedAdmin(currentUser.email, sessionUser?.role);
+    const isAdmin =
+      isAuthorizedAdmin(currentUser.email) ||
+      Boolean(verifiedSession?.isSigned && sessionUser?.role === "ADMIN");
+
     if (!isAdmin) {
+      if (isAdminApi) {
+        return NextResponse.json(
+          { error: "Access denied. Admin authorization required." },
+          { status: 403 }
+        );
+      }
       const deniedUrl = request.nextUrl.clone();
       deniedUrl.pathname = "/";
       deniedUrl.search = "?error=access-denied";
